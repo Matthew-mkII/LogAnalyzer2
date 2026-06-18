@@ -1,9 +1,20 @@
-"""Bluetooth 受信ログのファイル出力"""
+"""Bluetooth 受信ログのファイル出力（レガシー CSV 形式）"""
 
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_COLUMNS = ("received_at", "sample_index", "raw_data", "parsed_value")
+LEGACY_VALUE_COLUMNS = (
+    "turn",
+    "speed",
+    "battery",
+    "angleL",
+    "angleR",
+    "bright",
+    "gyro",
+    "Kp",
+    "Ki",
+    "Kd",
+)
 
 
 class LogWriter:
@@ -11,75 +22,45 @@ class LogWriter:
         self._log_dir = Path(log_dir)
         self._file = None
         self._path: Path | None = None
-        self._columns: tuple[str, ...] = DEFAULT_COLUMNS
 
-    def start(
-        self,
-        device_address: str = "",
-        columns: tuple[str, ...] | list[str] | None = None,
-        metadata: dict[str, str] | None = None,
-    ) -> Path:
+    def start(self) -> Path:
         self._log_dir.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._path = self._log_dir / f"log_{timestamp}.csv"
-        self._columns = tuple(columns) if columns else DEFAULT_COLUMNS
         self._file = self._path.open("w", encoding="utf-8", newline="")
-        self._write_header(device_address=device_address, metadata=metadata)
+        self._write_header()
         self._file.flush()
         return self._path
 
-    def _write_header(
-        self,
-        device_address: str = "",
-        metadata: dict[str, str] | None = None,
-    ) -> None:
+    def _write_header(self) -> None:
         if self._file is None:
             return
 
-        started_at = datetime.now().isoformat(timespec="milliseconds")
-        header_lines = [
-            "# format=LogAnalyzer2",
-            f"# started_at={started_at}",
-        ]
+        column_names = ", ".join(["time", *LEGACY_VALUE_COLUMNS])
+        self._file.write("# THRESHOLD= 0.000000\n")
+        self._file.write("# Speed = 0.000000; Proportional = 0.000000; Integral = 0.000000\n")
+        self._file.write(f"# {column_names}\n")
 
-        if device_address:
-            header_lines.append(f"# device_address={device_address}")
+    @staticmethod
+    def _format_time(time_ms: float) -> str:
+        if float(time_ms).is_integer():
+            return str(int(time_ms))
+        return f"{time_ms:.6f}"
 
-        if metadata:
-            for key, value in metadata.items():
-                header_lines.append(f"# {key}={value}")
+    @staticmethod
+    def _format_value(value: float) -> str:
+        return f"{value:.6f}"
 
-        header_lines.append(f"# columns={','.join(self._columns)}")
-        header_lines.append(",".join(self._columns))
-
-        self._file.write("\n".join(header_lines) + "\n")
-
-    def write(
-        self,
-        raw_data: str,
-        sample_index: int | None,
-        parsed_value: float | None,
-        received_at: datetime | None = None,
-    ) -> None:
+    def write(self, elapsed_ms: float, values: dict[str, float] | None = None) -> None:
         if self._file is None:
             return
 
-        received_at = received_at or datetime.now()
-        row = {
-            "received_at": received_at.isoformat(timespec="milliseconds"),
-            "sample_index": "" if sample_index is None else str(sample_index),
-            "raw_data": raw_data.replace('"', '""'),
-            "parsed_value": "" if parsed_value is None else str(parsed_value),
-        }
-        values = []
-        for column in self._columns:
-            value = row.get(column, "")
-            if column == "raw_data":
-                values.append(f'"{value}"')
-            else:
-                values.append(str(value))
+        row_values = values or {}
+        fields = [self._format_time(elapsed_ms)]
+        for column in LEGACY_VALUE_COLUMNS:
+            fields.append(self._format_value(row_values.get(column, 0.0)))
 
-        self._file.write(",".join(values) + "\n")
+        self._file.write(",".join(fields) + "\n")
         self._file.flush()
 
     def stop(self) -> Path | None:
@@ -100,4 +81,4 @@ class LogWriter:
 
     @property
     def columns(self) -> tuple[str, ...]:
-        return self._columns
+        return ("time", *LEGACY_VALUE_COLUMNS)

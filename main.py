@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         self._clear_series_panel()
         self._render_graph()
 
-        log_path = self._log_writer.start(device_address=address)
+        log_path = self._log_writer.start()
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _on_disconnected(self) -> None:
@@ -318,7 +318,14 @@ class MainWindow(QMainWindow):
                 self._schedule_graph_update()
 
             if self._log_writer.is_active:
-                self._log_writer.write(stripped, sample_index, value, received_at)
+                if self._session_start is None:
+                    self._session_start = received_at
+
+                elapsed_ms = (received_at - self._session_start).total_seconds() * 1000
+                row_values: dict[str, float] = {}
+                if value is not None:
+                    row_values["gyro"] = value
+                self._log_writer.write(elapsed_ms, row_values)
 
     def _parse_value(self, line: str) -> float | None:
         line = line.strip()
