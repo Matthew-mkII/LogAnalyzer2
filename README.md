@@ -1,4 +1,4 @@
-# PyQt + Plotly Graph App
+# LogAnalyzer2
 
 ## 概要
 PyQt6とPlotlyを使ったグラフ描画アプリ
