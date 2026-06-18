@@ -3,6 +3,8 @@ import sys
 
 _SUPPRESSED_STDERR_MESSAGES = (
     "GPUInfo not initialized on GpuInfoUpdate",
+    "TSMSendMessageToUIServer",
+    "IMKCFRunLoopWakeUpReliable",
 )
 
 
@@ -46,6 +48,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -56,7 +59,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
-from log_reader import load_log_csv
+from log_reader import inspect_log_csv, load_log_csv
 from log_writer import LogWriter
 
 
@@ -218,7 +221,22 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            log_data = load_log_csv(path)
+            log_format, columns = inspect_log_csv(path)
+            y_column = None
+            if log_format == "legacy":
+                default_column = "gyro" if "gyro" in columns else columns[0]
+                y_column, ok = QInputDialog.getItem(
+                    self,
+                    "CSV列選択",
+                    "Y軸に表示する列:",
+                    columns,
+                    columns.index(default_column),
+                    False,
+                )
+                if not ok:
+                    return
+
+            log_data = load_log_csv(path, y_column=y_column)
         except Exception as exc:
             QMessageBox.warning(self, "CSV読み込み", str(exc))
             return
@@ -227,7 +245,11 @@ class MainWindow(QMainWindow):
         self._y_data = log_data.y
         self._sample_index = log_data.last_sample_index
         self._session_start = None
-        self._legend_name = log_data.source.stem
+        self._legend_name = (
+            f"{log_data.source.stem}:{log_data.y_column}"
+            if log_data.available_columns
+            else log_data.source.stem
+        )
         title = f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
         self._render_graph(title=title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
@@ -314,6 +336,7 @@ class MainWindow(QMainWindow):
                 x=x_plot,
                 y=self._y_data,
                 labels={"x": "経過時間 (ms)", "y": "値"},
+                render_mode="svg",
             )
             fig.update_xaxes(range=[0, x_max * 1.05], autorange=False)
             self._apply_graph_layout(fig, title=title)
@@ -322,6 +345,7 @@ class MainWindow(QMainWindow):
                 x=[0],
                 y=[0],
                 labels={"x": "経過時間 (ms)", "y": "値"},
+                render_mode="svg",
             )
             fig.update_xaxes(range=[0, 1], autorange=False)
             self._apply_graph_layout(fig, title="データ待機中...")
