@@ -16,6 +16,17 @@ class LogData:
     last_sample_index: int
 
 
+def _iter_data_lines(path: Path) -> list[str]:
+    data_lines: list[str] = []
+    with path.open(encoding="utf-8", newline="") as file:
+        for line in file:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            data_lines.append(stripped)
+    return data_lines
+
+
 def inspect_log_csv(path: Path | str) -> tuple[str, list[str]]:
     path = Path(path)
     if not path.is_file():
@@ -112,18 +123,21 @@ def _to_elapsed_ms(timestamps: list[datetime]) -> list[float]:
 
 
 def _load_app_log(path: Path) -> LogData:
+    data_lines = _iter_data_lines(path)
+    if not data_lines:
+        raise ValueError("CSV にデータ行がありません")
+
+    reader = csv.DictReader(data_lines)
+    if reader.fieldnames is None:
+        raise ValueError("CSV にヘッダー行がありません")
+
     timestamps: list[datetime] = []
     values: list[float] = []
     total_rows = 0
     last_sample_index = 0
     fallback_base: datetime | None = None
 
-    with path.open(encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames is None:
-            raise ValueError("CSV にヘッダー行がありません")
-
-        for row in reader:
+    for row in reader:
             total_rows += 1
             parsed = row.get("parsed_value", "").strip()
             if not parsed:

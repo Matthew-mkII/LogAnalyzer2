@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         self._clear_series_panel()
         self._render_graph()
 
-        log_path = self._log_writer.start()
+        log_path = self._log_writer.start(device_address=address)
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _on_disconnected(self) -> None:
