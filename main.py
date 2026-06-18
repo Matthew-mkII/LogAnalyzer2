@@ -18,6 +18,7 @@ from PyQt6.QtCore import QTimer, QUrl
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
+from log_reader import load_log_csv
 from log_writer import LogWriter
 
 
@@ -99,6 +101,10 @@ class MainWindow(QMainWindow):
         self.log_path_label.setMinimumWidth(400)
         layout.addWidget(self.log_path_label)
 
+        self.load_csv_btn = QPushButton("CSVからグラフ")
+        self.load_csv_btn.clicked.connect(self._on_load_csv_clicked)
+        layout.addWidget(self.load_csv_btn)
+
         return container
 
     def _setup_bluetooth_signals(self) -> None:
@@ -154,6 +160,29 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Bluetooth", message)
         self._on_disconnected()
 
+    def _on_load_csv_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "ログ CSV を開く",
+            "logs",
+            "CSV Files (*.csv)",
+        )
+        if not path:
+            return
+
+        try:
+            log_data = load_log_csv(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "CSV読み込み", str(exc))
+            return
+
+        self._x_data = log_data.x
+        self._y_data = log_data.y
+        self._sample_index = int(max(log_data.x))
+        title = f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
+        self._render_graph(title=title)
+        self.log_path_label.setText(f"表示中: {log_data.source}")
+
     def _on_data_received(self, text: str) -> None:
         for line in text.splitlines():
             stripped = line.strip()
@@ -198,11 +227,13 @@ class MainWindow(QMainWindow):
             self._graph_dirty = True
             self._graph_timer.start(200)
 
-    def _render_graph(self) -> None:
+    def _render_graph(self, title: str | None = None) -> None:
         self._graph_dirty = False
 
         if self._x_data:
             fig = px.line(x=self._x_data, y=self._y_data, labels={"x": "サンプル", "y": "値"})
+            if title:
+                fig.update_layout(title=title)
         else:
             fig = px.line(
                 x=[0],
