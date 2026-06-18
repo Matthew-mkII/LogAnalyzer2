@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
         self.connect_btn = QPushButton("接続")
         self.connect_btn.clicked.connect(self._on_connect_clicked)
 
-        self.disconnect_btn = QPushButton("切断")
+        self.disconnect_btn = QPushButton("切断（ログ書き込み）")
         self.disconnect_btn.clicked.connect(self._on_disconnect_clicked)
         self.disconnect_btn.setEnabled(False)
 
