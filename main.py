@@ -61,7 +61,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
-from log_writer import LogWriter
+from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, parse_legacy_row
 
 
 def _qt_message_handler(mode, _context, message) -> None:
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("LogAnalyzer2 by matthew")
 
         self._x_data: list[float] = []
-        self._series_data: dict[str, list[float]] = {}
+        self._series_data: dict[str, list[float | None]] = {}
         self._enabled_series: set[str] = set()
         self._series_checkboxes: dict[str, QCheckBox] = {}
         self._graph_title: str | None = None
@@ -242,8 +242,8 @@ class MainWindow(QMainWindow):
 
         self._session_start = None
         self._x_data = []
-        self._series_data = {"受信データ": []}
-        self._enabled_series = {"受信データ"}
+        self._series_data = {}
+        self._enabled_series = set()
         self._graph_title = None
         self._sample_index = 0
         self._clear_series_panel()
@@ -293,59 +293,39 @@ class MainWindow(QMainWindow):
         self._render_graph(title=self._graph_title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
 
+    def _ensure_realtime_series(self) -> None:
+        if self._series_data:
+            return
+
+        self._series_data = {column: [] for column in LEGACY_VALUE_COLUMNS}
+        self._setup_series_panel(list(LEGACY_VALUE_COLUMNS))
+
     def _on_data_received(self, text: str) -> None:
         for line in text.splitlines():
             stripped = line.strip()
             if not stripped:
                 continue
 
-            value = self._parse_value(stripped)
-            sample_index = None
             received_at = datetime.now()
+            device_time, row_values = parse_legacy_row(stripped)
 
-            if value is not None:
-                if self._session_start is None:
-                    self._session_start = received_at
+            if self._session_start is None:
+                self._session_start = received_at
 
-                self._sample_index += 1
-                sample_index = self._sample_index
+            if device_time is not None:
+                elapsed_ms = device_time
+            else:
                 elapsed_ms = (received_at - self._session_start).total_seconds() * 1000
-                self._x_data.append(elapsed_ms)
-                if "受信データ" not in self._series_data:
-                    self._series_data = {"受信データ": []}
-                    self._enabled_series = {"受信データ"}
-                self._series_data["受信データ"].append(value)
-                self._schedule_graph_update()
+
+            self._sample_index += 1
+            self._ensure_realtime_series()
+            self._x_data.append(elapsed_ms)
+            for column in LEGACY_VALUE_COLUMNS:
+                self._series_data[column].append(row_values[column])
+            self._schedule_graph_update()
 
             if self._log_writer.is_active:
-                if self._session_start is None:
-                    self._session_start = received_at
-
-                elapsed_ms = (received_at - self._session_start).total_seconds() * 1000
-                row_values: dict[str, float] = {}
-                if value is not None:
-                    row_values["gyro"] = value
                 self._log_writer.write(elapsed_ms, row_values)
-
-    def _parse_value(self, line: str) -> float | None:
-        line = line.strip()
-        if not line:
-            return None
-
-        # "timestamp,value" 形式
-        if "," in line:
-            parts = line.split(",")
-            for part in reversed(parts):
-                try:
-                    return float(part.strip())
-                except ValueError:
-                    continue
-            return None
-
-        try:
-            return float(line)
-        except ValueError:
-            return None
 
     def _schedule_graph_update(self) -> None:
         if not self._graph_dirty:

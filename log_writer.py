@@ -16,6 +16,50 @@ LEGACY_VALUE_COLUMNS = (
     "Kd",
 )
 
+LEGACY_ROW_COLUMN_COUNT = len(LEGACY_VALUE_COLUMNS)
+
+
+def _parse_optional_float(raw: str) -> float | None:
+    stripped = raw.strip()
+    if not stripped:
+        return None
+    try:
+        return float(stripped)
+    except ValueError:
+        return None
+
+
+def parse_legacy_row(line: str) -> tuple[float | None, dict[str, float | None]]:
+    """Bluetooth 受信行をレガシー CSV のデータ列として解釈する。
+
+    列数不足・数値変換不可の項目は None として扱う。
+
+    Returns:
+        (device_time_ms, values)
+        device_time_ms は先頭に time 列が含まれる場合のみ設定される。
+    """
+    stripped = line.strip()
+    if not stripped:
+        return None, {column: None for column in LEGACY_VALUE_COLUMNS}
+
+    parts = [part.strip() for part in stripped.split(",")]
+
+    if len(parts) >= LEGACY_ROW_COLUMN_COUNT + 1:
+        device_time = _parse_optional_float(parts[0])
+        value_parts = parts[1 : LEGACY_ROW_COLUMN_COUNT + 1]
+    else:
+        device_time = None
+        value_parts = parts[:LEGACY_ROW_COLUMN_COUNT]
+
+    while len(value_parts) < LEGACY_ROW_COLUMN_COUNT:
+        value_parts.append("")
+
+    values = {
+        column: _parse_optional_float(raw_value)
+        for column, raw_value in zip(LEGACY_VALUE_COLUMNS, value_parts, strict=True)
+    }
+    return device_time, values
+
 
 class LogWriter:
     def __init__(self, log_dir: str = "logs") -> None:
@@ -48,17 +92,19 @@ class LogWriter:
         return f"{time_ms:.6f}"
 
     @staticmethod
-    def _format_value(value: float) -> str:
+    def _format_value(value: float | None) -> str:
+        if value is None:
+            return ""
         return f"{value:.6f}"
 
-    def write(self, elapsed_ms: float, values: dict[str, float] | None = None) -> None:
+    def write(self, elapsed_ms: float, values: dict[str, float | None] | None = None) -> None:
         if self._file is None:
             return
 
         row_values = values or {}
         fields = [self._format_time(elapsed_ms)]
         for column in LEGACY_VALUE_COLUMNS:
-            fields.append(self._format_value(row_values.get(column, 0.0)))
+            fields.append(self._format_value(row_values.get(column)))
 
         self._file.write(",".join(fields) + "\n")
         self._file.flush()
