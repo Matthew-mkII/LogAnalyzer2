@@ -94,8 +94,6 @@ class LogWriter:
             return
 
         column_names = ", ".join(["time", *LEGACY_VALUE_COLUMNS])
-        self._file.write("# THRESHOLD= 0.000000\n")
-        self._file.write("# Speed = 0.000000; Proportional = 0.000000; Integral = 0.000000\n")
         self._file.write(f"# {column_names}\n")
 
     @staticmethod
