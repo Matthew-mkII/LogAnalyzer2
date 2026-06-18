@@ -89,6 +89,8 @@ class MainWindow(QMainWindow):
         self._sample_index = 0
         self._session_start: datetime | None = None
         self._graph_io_error_shown = False
+        self._csv_view_active = False
+        self._pre_csv_log_label = "ログ: 未記録"
         self._html_path = os.path.abspath("temp.html")
 
         self.bt_manager = BluetoothManager()
@@ -152,6 +154,11 @@ class MainWindow(QMainWindow):
         self.load_csv_btn = QPushButton("CSVからグラフ")
         self.load_csv_btn.clicked.connect(self._on_load_csv_clicked)
         layout.addWidget(self.load_csv_btn)
+
+        self.reset_view_btn = QPushButton("初期状態に戻す")
+        self.reset_view_btn.clicked.connect(self._on_reset_view_clicked)
+        self.reset_view_btn.setEnabled(False)
+        layout.addWidget(self.reset_view_btn)
 
         return container
 
@@ -248,6 +255,8 @@ class MainWindow(QMainWindow):
         self._graph_title = None
         self._sample_index = 0
         self._graph_io_error_shown = False
+        self._csv_view_active = False
+        self.reset_view_btn.setEnabled(False)
         self._clear_series_panel()
         self._render_graph()
 
@@ -305,6 +314,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "CSV読み込み", str(exc))
             return
 
+        self._pre_csv_log_label = self.log_path_label.text()
         self._x_data = log_data.x
         self._series_data = log_data.series
         self._sample_index = log_data.last_sample_index
@@ -315,6 +325,29 @@ class MainWindow(QMainWindow):
         self._setup_series_panel(list(log_data.series.keys()))
         self._render_graph(title=self._graph_title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
+        self._csv_view_active = True
+        self.reset_view_btn.setEnabled(True)
+
+    def _on_reset_view_clicked(self) -> None:
+        if not self._csv_view_active:
+            return
+        self._reset_graph_view()
+
+    def _reset_graph_view(self) -> None:
+        self._graph_timer.stop()
+        self._graph_dirty = False
+        self._x_data = []
+        self._series_data = {}
+        self._enabled_series = set()
+        self._graph_title = None
+        self._sample_index = 0
+        if not self.bt_manager.is_connected:
+            self._session_start = None
+        self._clear_series_panel()
+        self._render_graph()
+        self.log_path_label.setText(self._pre_csv_log_label)
+        self._csv_view_active = False
+        self.reset_view_btn.setEnabled(False)
 
     def _ensure_realtime_series(self) -> None:
         if self._series_data:
