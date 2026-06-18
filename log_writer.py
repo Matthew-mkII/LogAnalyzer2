@@ -10,11 +10,10 @@ class LogWriter:
         self._file = None
         self._path: Path | None = None
 
-    def start(self, device_address: str = "") -> Path:
+    def start(self) -> Path:
         self._log_dir.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_address = device_address.replace(":", "-") if device_address else "unknown"
-        self._path = self._log_dir / f"log_{timestamp}_{safe_address}.csv"
+        self._path = self._log_dir / f"log_{timestamp}.csv"
         self._file = self._path.open("w", encoding="utf-8", newline="")
         self._file.write("received_at,sample_index,raw_data,parsed_value\n")
         self._file.flush()

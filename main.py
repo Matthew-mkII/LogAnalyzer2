@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         self._sample_index = 0
         self._render_graph()
 
-        log_path = self._log_writer.start(address)
+        log_path = self._log_writer.start()
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _on_disconnected(self) -> None:
