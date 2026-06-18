@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from log_writer import parse_optional_float
+
 
 @dataclass
 class LogData:
     x: list[float]
-    series: dict[str, list[float]]
+    series: dict[str, list[float | None]]
     source: Path
     total_rows: int
     plotted_rows: int
@@ -77,7 +79,7 @@ def _load_legacy_log(path: Path, value_columns: list[str]) -> LogData:
         raise ValueError("レガシー CSV に数値列がありません")
 
     times: list[float] = []
-    series: dict[str, list[float]] = {column: [] for column in value_columns}
+    series: dict[str, list[float | None]] = {column: [] for column in value_columns}
     total_rows = 0
 
     with path.open(encoding="utf-8", newline="") as file:
@@ -88,14 +90,19 @@ def _load_legacy_log(path: Path, value_columns: list[str]) -> LogData:
 
             total_rows += 1
             parts = [part.strip() for part in stripped.split(",")]
-            if len(parts) <= len(value_columns):
+            if not parts:
                 continue
 
-            try:
-                time_ms = float(parts[0])
-                row_values = [float(parts[index + 1]) for index in range(len(value_columns))]
-            except ValueError:
+            time_ms = parse_optional_float(parts[0])
+            if time_ms is None:
                 continue
+
+            value_parts = parts[1:]
+            while len(value_parts) < len(value_columns):
+                value_parts.append("")
+            value_parts = value_parts[: len(value_columns)]
+
+            row_values = [parse_optional_float(raw_value) for raw_value in value_parts]
 
             times.append(time_ms)
             for column, value in zip(value_columns, row_values, strict=True):
@@ -138,31 +145,31 @@ def _load_app_log(path: Path) -> LogData:
     fallback_base: datetime | None = None
 
     for row in reader:
-            total_rows += 1
-            parsed = row.get("parsed_value", "").strip()
-            if not parsed:
-                continue
+        total_rows += 1
+        parsed = row.get("parsed_value", "").strip()
+        if not parsed:
+            continue
 
-            try:
-                value = float(parsed)
-            except ValueError:
-                continue
+        try:
+            value = float(parsed)
+        except ValueError:
+            continue
 
-            index_str = row.get("sample_index", "").strip()
-            if index_str:
-                last_sample_index = max(last_sample_index, int(float(index_str)))
+        index_str = row.get("sample_index", "").strip()
+        if index_str:
+            last_sample_index = max(last_sample_index, int(float(index_str)))
 
-            received_str = row.get("received_at", "").strip()
-            if received_str:
-                timestamps.append(datetime.fromisoformat(received_str))
-            elif timestamps:
-                timestamps.append(timestamps[-1] + timedelta(milliseconds=1000))
-            else:
-                if fallback_base is None:
-                    fallback_base = datetime.now()
-                timestamps.append(fallback_base)
+        received_str = row.get("received_at", "").strip()
+        if received_str:
+            timestamps.append(datetime.fromisoformat(received_str))
+        elif timestamps:
+            timestamps.append(timestamps[-1] + timedelta(milliseconds=1000))
+        else:
+            if fallback_base is None:
+                fallback_base = datetime.now()
+            timestamps.append(fallback_base)
 
-            values.append(value)
+        values.append(value)
 
     if not timestamps:
         raise ValueError("グラフ用の数値データがありません")

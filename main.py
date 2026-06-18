@@ -61,7 +61,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
-from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, parse_legacy_row
+from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, LogWriterError, parse_legacy_row
 
 
 def _qt_message_handler(mode, _context, message) -> None:
@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         self._graph_title: str | None = None
         self._sample_index = 0
         self._session_start: datetime | None = None
+        self._graph_io_error_shown = False
         self._html_path = os.path.abspath("temp.html")
 
         self.bt_manager = BluetoothManager()
@@ -246,10 +247,17 @@ class MainWindow(QMainWindow):
         self._enabled_series = set()
         self._graph_title = None
         self._sample_index = 0
+        self._graph_io_error_shown = False
         self._clear_series_panel()
         self._render_graph()
 
-        log_path = self._log_writer.start()
+        try:
+            log_path = self._log_writer.start()
+        except LogWriterError as exc:
+            QMessageBox.warning(self, "ログ保存", str(exc))
+            asyncio.create_task(self.bt_manager.disconnect())
+            return
+
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _on_disconnected(self) -> None:
@@ -258,9 +266,24 @@ class MainWindow(QMainWindow):
         self.scan_btn.setEnabled(True)
 
         if self._log_writer.is_active:
-            log_path = self._log_writer.stop()
+            try:
+                log_path = self._log_writer.stop()
+            except LogWriterError as exc:
+                QMessageBox.warning(self, "ログ保存", str(exc))
+                self.log_path_label.setText("ログ: 保存エラー")
+                return
+
             if log_path:
                 self.log_path_label.setText(f"ログ保存済み: {log_path}")
+
+    def _handle_log_write_error(self, exc: LogWriterError) -> None:
+        QMessageBox.warning(self, "ログ保存", str(exc))
+        if self._log_writer.is_active:
+            try:
+                self._log_writer.stop()
+            except LogWriterError:
+                pass
+        self.log_path_label.setText("ログ: 記録エラー（書き込み停止）")
 
     def _on_bt_error(self, message: str) -> None:
         QMessageBox.warning(self, "Bluetooth", message)
@@ -325,7 +348,11 @@ class MainWindow(QMainWindow):
             self._schedule_graph_update()
 
             if self._log_writer.is_active:
-                self._log_writer.write(elapsed_ms, row_values)
+                try:
+                    self._log_writer.write(elapsed_ms, row_values)
+                except LogWriterError as exc:
+                    self._handle_log_write_error(exc)
+                    return
 
     def _schedule_graph_update(self) -> None:
         if not self._graph_dirty:
@@ -391,8 +418,18 @@ class MainWindow(QMainWindow):
             fig.update_xaxes(range=[0, 1], autorange=False)
             self._apply_graph_layout(fig, title=title or self._graph_title or "データ待機中...")
 
-        fig.write_html(self._html_path, include_plotlyjs=True)
-        self.browser.load(QUrl.fromLocalFile(self._html_path))
+        try:
+            fig.write_html(self._html_path, include_plotlyjs=True)
+            self.browser.load(QUrl.fromLocalFile(self._html_path))
+            self._graph_io_error_shown = False
+        except OSError as exc:
+            if not self._graph_io_error_shown:
+                self._graph_io_error_shown = True
+                QMessageBox.warning(
+                    self,
+                    "グラフ表示",
+                    f"グラフファイルを書き込めません: {exc}",
+                )
 
 
 def main() -> None:

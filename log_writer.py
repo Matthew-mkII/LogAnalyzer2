@@ -19,7 +19,7 @@ LEGACY_VALUE_COLUMNS = (
 LEGACY_ROW_COLUMN_COUNT = len(LEGACY_VALUE_COLUMNS)
 
 
-def _parse_optional_float(raw: str) -> float | None:
+def parse_optional_float(raw: str) -> float | None:
     stripped = raw.strip()
     if not stripped:
         return None
@@ -27,6 +27,10 @@ def _parse_optional_float(raw: str) -> float | None:
         return float(stripped)
     except ValueError:
         return None
+
+
+def _parse_optional_float(raw: str) -> float | None:
+    return parse_optional_float(raw)
 
 
 def parse_legacy_row(line: str) -> tuple[float | None, dict[str, float | None]]:
@@ -61,6 +65,10 @@ def parse_legacy_row(line: str) -> tuple[float | None, dict[str, float | None]]:
     return device_time, values
 
 
+class LogWriterError(OSError):
+    """ログファイルの作成・書き込みに失敗した場合の例外"""
+
+
 class LogWriter:
     def __init__(self, log_dir: str = "logs") -> None:
         self._log_dir = Path(log_dir)
@@ -68,12 +76,17 @@ class LogWriter:
         self._path: Path | None = None
 
     def start(self) -> Path:
-        self._log_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._path = self._log_dir / f"log_{timestamp}.csv"
-        self._file = self._path.open("w", encoding="utf-8", newline="")
-        self._write_header()
-        self._file.flush()
+        try:
+            self._log_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._path = self._log_dir / f"log_{timestamp}.csv"
+            self._file = self._path.open("w", encoding="utf-8", newline="")
+            self._write_header()
+            self._file.flush()
+        except OSError as exc:
+            self._file = None
+            self._path = None
+            raise LogWriterError(f"ログファイルを作成できません: {exc}") from exc
         return self._path
 
     def _write_header(self) -> None:
@@ -106,13 +119,21 @@ class LogWriter:
         for column in LEGACY_VALUE_COLUMNS:
             fields.append(self._format_value(row_values.get(column)))
 
-        self._file.write(",".join(fields) + "\n")
-        self._file.flush()
+        try:
+            self._file.write(",".join(fields) + "\n")
+            self._file.flush()
+        except OSError as exc:
+            raise LogWriterError(f"ログファイルへの書き込みに失敗しました: {exc}") from exc
 
     def stop(self) -> Path | None:
         path = self._path
         if self._file is not None:
-            self._file.close()
+            try:
+                self._file.close()
+            except OSError as exc:
+                self._file = None
+                self._path = None
+                raise LogWriterError(f"ログファイルを閉じられません: {exc}") from exc
             self._file = None
         self._path = None
         return path

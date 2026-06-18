@@ -7,6 +7,8 @@ from bleak import BleakClient, BleakScanner
 NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
+MAX_RECEIVE_BUFFER = 65536
+
 
 class BluetoothManager(QObject):
     device_discovered = Signal(str, str)  # name, address
@@ -21,6 +23,7 @@ class BluetoothManager(QObject):
         super().__init__()
         self._client: BleakClient | None = None
         self._notify_char_uuid: str | None = None
+        self._receive_buffer = ""
 
     async def scan(self, timeout: float = 5.0) -> None:
         self.status_changed.emit("スキャン中...")
@@ -53,6 +56,7 @@ class BluetoothManager(QObject):
                 self.error_occurred.emit("通知可能なキャラクタリスティックが見つかりません")
                 return
 
+            self._reset_receive_buffer()
             self._notify_char_uuid = notify_uuid
             await client.start_notify(notify_uuid, self._on_notify)
 
@@ -74,6 +78,7 @@ class BluetoothManager(QObject):
         except Exception as exc:
             self.error_occurred.emit(f"切断エラー: {exc}")
         finally:
+            self._flush_receive_buffer()
             self._client = None
             self._notify_char_uuid = None
             self.status_changed.emit("未接続")
@@ -83,12 +88,42 @@ class BluetoothManager(QObject):
     def is_connected(self) -> bool:
         return self._client is not None and self._client.is_connected
 
+    def _reset_receive_buffer(self) -> None:
+        self._receive_buffer = ""
+
+    def _flush_receive_buffer(self) -> None:
+        remainder = self._receive_buffer.strip()
+        self._receive_buffer = ""
+        if remainder:
+            self.data_received.emit(remainder)
+
+    def _append_receive_data(self, text: str) -> None:
+        self._receive_buffer += text
+        if len(self._receive_buffer) > MAX_RECEIVE_BUFFER:
+            self._receive_buffer = ""
+            self.error_occurred.emit(
+                f"受信バッファが上限 ({MAX_RECEIVE_BUFFER} バイト) を超えました"
+            )
+            return
+
+        while True:
+            for separator in ("\r\n", "\n", "\r"):
+                if separator in self._receive_buffer:
+                    line, self._receive_buffer = self._receive_buffer.split(separator, 1)
+                    line = line.strip()
+                    if line:
+                        self.data_received.emit(line)
+                    break
+            else:
+                break
+
     def _on_notify(self, _sender: int, data: bytearray) -> None:
-        text = data.decode("utf-8", errors="replace").strip()
+        text = data.decode("utf-8", errors="replace")
         if text:
-            self.data_received.emit(text)
+            self._append_receive_data(text)
 
     def _on_disconnected(self, _client: BleakClient) -> None:
+        self._flush_receive_buffer()
         self._client = None
         self._notify_char_uuid = None
         self.status_changed.emit("未接続")
