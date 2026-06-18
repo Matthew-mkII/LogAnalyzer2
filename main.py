@@ -59,6 +59,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
+from app_paths import logs_dir, temp_html_path
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
 from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, LogWriterError, parse_legacy_row
@@ -91,10 +92,10 @@ class MainWindow(QMainWindow):
         self._graph_io_error_shown = False
         self._csv_view_active = False
         self._pre_csv_log_label = "ログ: 未記録"
-        self._html_path = os.path.abspath("temp.html")
+        self._html_path = str(temp_html_path())
 
         self.bt_manager = BluetoothManager()
-        self._log_writer = LogWriter()
+        self._log_writer = LogWriter(str(logs_dir()))
 
         self.browser = QWebEngineView()
         self._render_graph()
@@ -302,7 +303,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "ログ CSV を開く",
-            "logs",
+            str(logs_dir()),
             "CSV Files (*.csv)",
         )
         if not path:
@@ -479,4 +480,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     main()
