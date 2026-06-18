@@ -11,6 +11,7 @@ os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 
 import asyncio
 import sys
+from datetime import datetime
 
 import plotly.express as px
 import qasync
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         self._x_data: list[float] = []
         self._y_data: list[float] = []
         self._sample_index = 0
+        self._session_start: datetime | None = None
         self._html_path = os.path.abspath("temp.html")
 
         self.bt_manager = BluetoothManager()
@@ -143,6 +145,12 @@ class MainWindow(QMainWindow):
         self.disconnect_btn.setEnabled(True)
         self.scan_btn.setEnabled(False)
 
+        self._session_start = datetime.now()
+        self._x_data = []
+        self._y_data = []
+        self._sample_index = 0
+        self._render_graph()
+
         log_path = self._log_writer.start(address)
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
@@ -178,7 +186,8 @@ class MainWindow(QMainWindow):
 
         self._x_data = log_data.x
         self._y_data = log_data.y
-        self._sample_index = int(max(log_data.x))
+        self._sample_index = log_data.last_sample_index
+        self._session_start = None
         title = f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
         self._render_graph(title=title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
@@ -191,16 +200,21 @@ class MainWindow(QMainWindow):
 
             value = self._parse_value(stripped)
             sample_index = None
+            received_at = datetime.now()
 
             if value is not None:
+                if self._session_start is None:
+                    self._session_start = received_at
+
                 self._sample_index += 1
                 sample_index = self._sample_index
-                self._x_data.append(self._sample_index)
+                elapsed_ms = (received_at - self._session_start).total_seconds() * 1000
+                self._x_data.append(elapsed_ms)
                 self._y_data.append(value)
                 self._schedule_graph_update()
 
             if self._log_writer.is_active:
-                self._log_writer.write(stripped, sample_index, value)
+                self._log_writer.write(stripped, sample_index, value, received_at)
 
     def _parse_value(self, line: str) -> float | None:
         line = line.strip()
@@ -231,14 +245,18 @@ class MainWindow(QMainWindow):
         self._graph_dirty = False
 
         if self._x_data:
-            fig = px.line(x=self._x_data, y=self._y_data, labels={"x": "サンプル", "y": "値"})
+            fig = px.line(
+                x=self._x_data,
+                y=self._y_data,
+                labels={"x": "経過時間 (ms)", "y": "値"},
+            )
             if title:
                 fig.update_layout(title=title)
         else:
             fig = px.line(
                 x=[0],
                 y=[0],
-                labels={"x": "サンプル", "y": "値"},
+                labels={"x": "経過時間 (ms)", "y": "値"},
             )
             fig.update_layout(title="データ待機中...")
 

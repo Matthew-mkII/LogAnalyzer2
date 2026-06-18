@@ -2,6 +2,7 @@
 
 import csv
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -12,6 +13,12 @@ class LogData:
     source: Path
     total_rows: int
     plotted_rows: int
+    last_sample_index: int
+
+
+def _to_elapsed_ms(timestamps: list[datetime]) -> list[float]:
+    start = timestamps[0]
+    return [(timestamp - start).total_seconds() * 1000 for timestamp in timestamps]
 
 
 def load_log_csv(path: Path | str) -> LogData:
@@ -19,9 +26,11 @@ def load_log_csv(path: Path | str) -> LogData:
     if not path.is_file():
         raise FileNotFoundError(f"ファイルが見つかりません: {path}")
 
-    x: list[float] = []
+    timestamps: list[datetime] = []
     y: list[float] = []
     total_rows = 0
+    last_sample_index = 0
+    fallback_base: datetime | None = None
 
     with path.open(encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
@@ -41,18 +50,28 @@ def load_log_csv(path: Path | str) -> LogData:
 
             index_str = row.get("sample_index", "").strip()
             if index_str:
-                x.append(float(index_str))
+                last_sample_index = max(last_sample_index, int(float(index_str)))
+
+            received_str = row.get("received_at", "").strip()
+            if received_str:
+                timestamps.append(datetime.fromisoformat(received_str))
+            elif timestamps:
+                timestamps.append(timestamps[-1] + timedelta(milliseconds=1000))
             else:
-                x.append(float(len(y) + 1))
+                if fallback_base is None:
+                    fallback_base = datetime.now()
+                timestamps.append(fallback_base)
+
             y.append(value)
 
-    if not x:
+    if not timestamps:
         raise ValueError("グラフ用の数値データがありません")
 
     return LogData(
-        x=x,
+        x=_to_elapsed_ms(timestamps),
         y=y,
         source=path,
         total_rows=total_rows,
-        plotted_rows=len(x),
+        plotted_rows=len(y),
+        last_sample_index=last_sample_index,
     )

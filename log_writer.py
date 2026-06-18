@@ -20,15 +20,22 @@ class LogWriter:
         self._file.flush()
         return self._path
 
-    def write(self, raw_data: str, sample_index: int | None, parsed_value: float | None) -> None:
+    def write(
+        self,
+        raw_data: str,
+        sample_index: int | None,
+        parsed_value: float | None,
+        received_at: datetime | None = None,
+    ) -> None:
         if self._file is None:
             return
 
-        received_at = datetime.now().isoformat(timespec="milliseconds")
+        received_at = received_at or datetime.now()
+        received_at_str = received_at.isoformat(timespec="milliseconds")
         escaped = raw_data.replace('"', '""')
         index = "" if sample_index is None else str(sample_index)
         value = "" if parsed_value is None else str(parsed_value)
-        self._file.write(f'{received_at},{index},"{escaped}",{value}\n')
+        self._file.write(f'{received_at_str},{index},"{escaped}",{value}\n')
         self._file.flush()
 
     def stop(self) -> Path | None:
