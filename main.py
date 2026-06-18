@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
+from log_writer import LogWriter
 
 
 class MainWindow(QMainWindow):
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         self._html_path = os.path.abspath("temp.html")
 
         self.bt_manager = BluetoothManager()
+        self._log_writer = LogWriter()
 
         self.browser = QWebEngineView()
         self._render_graph()
@@ -49,6 +51,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addLayout(self._create_bluetooth_panel())
+        layout.addWidget(self._create_log_panel())
         layout.addWidget(self.browser, stretch=1)
         self.setCentralWidget(central)
 
@@ -87,6 +90,17 @@ class MainWindow(QMainWindow):
 
         return panel
 
+    def _create_log_panel(self) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.log_path_label = QLabel("ログ: 未記録")
+        self.log_path_label.setMinimumWidth(400)
+        layout.addWidget(self.log_path_label)
+
+        return container
+
     def _setup_bluetooth_signals(self) -> None:
         self.bt_manager.device_discovered.connect(self._on_device_discovered)
         self.bt_manager.scan_finished.connect(self._on_scan_finished)
@@ -118,15 +132,23 @@ class MainWindow(QMainWindow):
     def _on_disconnect_clicked(self) -> None:
         asyncio.create_task(self.bt_manager.disconnect())
 
-    def _on_connected(self, _address: str) -> None:
+    def _on_connected(self, address: str) -> None:
         self.connect_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
         self.scan_btn.setEnabled(False)
+
+        log_path = self._log_writer.start(address)
+        self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _on_disconnected(self) -> None:
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
         self.scan_btn.setEnabled(True)
+
+        if self._log_writer.is_active:
+            log_path = self._log_writer.stop()
+            if log_path:
+                self.log_path_label.setText(f"ログ保存済み: {log_path}")
 
     def _on_bt_error(self, message: str) -> None:
         QMessageBox.warning(self, "Bluetooth", message)
@@ -134,12 +156,22 @@ class MainWindow(QMainWindow):
 
     def _on_data_received(self, text: str) -> None:
         for line in text.splitlines():
-            value = self._parse_value(line)
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            value = self._parse_value(stripped)
+            sample_index = None
+
             if value is not None:
                 self._sample_index += 1
+                sample_index = self._sample_index
                 self._x_data.append(self._sample_index)
                 self._y_data.append(value)
                 self._schedule_graph_update()
+
+            if self._log_writer.is_active:
+                self._log_writer.write(stripped, sample_index, value)
 
     def _parse_value(self, line: str) -> float | None:
         line = line.strip()
