@@ -146,7 +146,7 @@ class MainWindow(QMainWindow):
         self.disconnect_btn.setEnabled(True)
         self.scan_btn.setEnabled(False)
 
-        self._session_start = datetime.now()
+        self._session_start = None
         self._x_data = []
         self._y_data = []
         self._sample_index = 0
@@ -246,11 +246,14 @@ class MainWindow(QMainWindow):
         self._graph_dirty = False
 
         if self._x_data:
+            x_offset = self._x_data[0]
+            x_plot = [x - x_offset for x in self._x_data]
             fig = px.line(
-                x=self._x_data,
+                x=x_plot,
                 y=self._y_data,
                 labels={"x": "経過時間 (ms)", "y": "値"},
             )
+            fig.update_xaxes(rangemode="tozero")
             if title:
                 fig.update_layout(title=title)
         else:
