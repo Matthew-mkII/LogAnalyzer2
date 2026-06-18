@@ -1,6 +1,6 @@
 """BLE (Bluetooth Low Energy) 接続管理"""
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 from bleak import BleakClient, BleakScanner
 
 # Nordic UART Service（多くのログ機器で使われるシリアル通信プロファイル）
@@ -9,13 +9,13 @@ NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 
 class BluetoothManager(QObject):
-    device_discovered = pyqtSignal(str, str)  # name, address
-    scan_finished = pyqtSignal()
-    connected = pyqtSignal(str)
-    disconnected = pyqtSignal()
-    data_received = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
-    status_changed = pyqtSignal(str)
+    device_discovered = Signal(str, str)  # name, address
+    scan_finished = Signal()
+    connected = Signal(str)
+    disconnected = Signal()
+    data_received = Signal(str)
+    error_occurred = Signal(str)
+    status_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()

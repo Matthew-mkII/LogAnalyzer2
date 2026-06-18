@@ -8,6 +8,7 @@ os.environ["QT_OPENGL"] = "software"
 os.environ["QT_XCB_GL_INTEGRATION"] = "none"
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+os.environ["QT_API"] = "pyside6"
 
 import asyncio
 import sys
@@ -15,8 +16,8 @@ from datetime import datetime
 
 import plotly.express as px
 import qasync
-from PyQt6.QtCore import QTimer, QUrl
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
@@ -28,7 +29,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv

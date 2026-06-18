@@ -1,0 +1,67 @@
+LogAnalyzer2 - Third Party Notices
+==================================
+
+本ファイルは、LogAnalyzer2 の配布物に含まれる第三者ライブラリの
+ライセンス情報および著作権表示をまとめたものです。
+
+本ソフトウェア本体の利用条件については、LICENSE を参照してください。
+
+
+PySide6 / Qt
+------------
+ライセンス: GNU Lesser General Public License v3.0 (LGPL-3.0)
+著作権者: The Qt Company Ltd. および貢献者
+使用目的: GUI フレームワーク、WebEngine によるグラフ表示
+ライセンス全文: licenses/LGPL-3.0.txt
+
+LGPL に基づき、本ソフトウェアに動的リンクされた PySide6 / Qt ライブラリの
+ソースコードを取得する場合は、以下を参照してください。
+- PySide6: https://pypi.org/project/PySide6/
+- Qt: https://www.qt.io/download-open-source
+
+ソースコードの提供を希望される場合は、配布元のコミュニティ管理者まで
+お問い合わせください。
+
+
+MIT License
+-----------
+以下のライブラリは MIT License の下で使用しています。
+ライセンス全文: licenses/MIT.txt
+
+- bleak (https://github.com/hbldh/bleak)
+- choreographer (https://github.com/plotly/choreographer)
+- kaleido (https://github.com/plotly/Kaleido)
+- logistro (https://github.com/plotly/logistro)
+- narwhals (https://github.com/narwhals-dev/narwhals)
+- plotly (https://github.com/plotly/plotly.py)
+- platformdirs (https://github.com/tox-dev/platformdirs)
+- qasync (https://github.com/CabbageDevelopment/qasync)
+- simplejson (https://github.com/simplejson/simplejson)
+
+
+BSD License
+-----------
+以下のライブラリは BSD License の下で使用しています。
+
+- numpy (https://numpy.org/) - BSD 3-Clause License
+- pandas (https://pandas.pydata.org/) - BSD 3-Clause License
+
+
+Apache License 2.0 / BSD License (Dual)
+--------------------------------------
+- orjson (https://github.com/ijl/orjson)
+- packaging (https://github.com/pypa/packaging)
+- python-dateutil (https://github.com/dateutil/dateutil)
+
+
+MIT License
+-----------
+- six (https://github.com/benjaminp/six)
+
+
+注意事項
+--------
+- 上記のバージョン情報は requirements.txt に記載のものを使用しています。
+- 各ライブラリのライセンス条件は、配布時点のバージョンに従います。
+- 本ファイルは法的助言を構成するものではありません。
+  配布前に必要に応じて専門家へご確認ください。
