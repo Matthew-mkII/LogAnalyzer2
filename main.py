@@ -1,8 +1,33 @@
 import os
+import sys
+
+_SUPPRESSED_STDERR_MESSAGES = (
+    "GPUInfo not initialized on GpuInfoUpdate",
+)
+
+
+class _FilteredStderr:
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        if any(message in text for message in _SUPPRESSED_STDERR_MESSAGES):
+            return len(text)
+        return self._stream.write(text)
+
+    def flush(self):
+        self._stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+sys.stderr = _FilteredStderr(sys.stderr)
 
 # ★ 完全安定設定
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-    "--disable-gpu --disable-software-rasterizer --disable-gpu-compositing"
+    "--disable-gpu --disable-software-rasterizer --disable-gpu-compositing "
+    "--disable-logging --log-level=3"
 )
 os.environ["QT_OPENGL"] = "software"
 os.environ["QT_XCB_GL_INTEGRATION"] = "none"
@@ -11,12 +36,11 @@ os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 os.environ["QT_API"] = "pyside6"
 
 import asyncio
-import sys
 from datetime import datetime
 
 import plotly.express as px
 import qasync
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import QTimer, QUrl, QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -36,6 +60,18 @@ from log_reader import load_log_csv
 from log_writer import LogWriter
 
 
+def _qt_message_handler(mode, _context, message) -> None:
+    if "GPUInfo not initialized on GpuInfoUpdate" in message:
+        return
+    if mode == QtMsgType.QtFatalMsg:
+        sys.__stderr__.write(f"Fatal: {message}\n")
+    elif mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg):
+        sys.__stderr__.write(f"{message}\n")
+
+
+qInstallMessageHandler(_qt_message_handler)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -45,6 +81,7 @@ class MainWindow(QMainWindow):
         self._y_data: list[float] = []
         self._sample_index = 0
         self._session_start: datetime | None = None
+        self._legend_name = "受信データ"
         self._html_path = os.path.abspath("temp.html")
 
         self.bt_manager = BluetoothManager()
@@ -147,6 +184,7 @@ class MainWindow(QMainWindow):
         self.scan_btn.setEnabled(False)
 
         self._session_start = None
+        self._legend_name = "受信データ"
         self._x_data = []
         self._y_data = []
         self._sample_index = 0
@@ -189,6 +227,7 @@ class MainWindow(QMainWindow):
         self._y_data = log_data.y
         self._sample_index = log_data.last_sample_index
         self._session_start = None
+        self._legend_name = log_data.source.stem
         title = f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
         self._render_graph(title=title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
@@ -242,27 +281,50 @@ class MainWindow(QMainWindow):
             self._graph_dirty = True
             self._graph_timer.start(200)
 
+    def _normalize_x_axis(self, x_data: list[float]) -> list[float]:
+        if not x_data:
+            return []
+        x_min = min(x_data)
+        return [x - x_min for x in x_data]
+
+    def _apply_graph_layout(self, fig, title: str | None = None) -> None:
+        fig.update_traces(name=self._legend_name)
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="left",
+                x=0,
+            ),
+        )
+        if title:
+            fig.update_layout(title=title)
+
     def _render_graph(self, title: str | None = None) -> None:
         self._graph_dirty = False
 
         if self._x_data:
-            x_offset = self._x_data[0]
-            x_plot = [x - x_offset for x in self._x_data]
+            x_plot = self._normalize_x_axis(self._x_data)
+            x_max = max(x_plot)
+            if x_max <= 0:
+                x_max = 1
             fig = px.line(
                 x=x_plot,
                 y=self._y_data,
                 labels={"x": "経過時間 (ms)", "y": "値"},
             )
-            fig.update_xaxes(rangemode="tozero")
-            if title:
-                fig.update_layout(title=title)
+            fig.update_xaxes(range=[0, x_max * 1.05], autorange=False)
+            self._apply_graph_layout(fig, title=title)
         else:
             fig = px.line(
                 x=[0],
                 y=[0],
                 labels={"x": "経過時間 (ms)", "y": "値"},
             )
-            fig.update_layout(title="データ待機中...")
+            fig.update_xaxes(range=[0, 1], autorange=False)
+            self._apply_graph_layout(fig, title="データ待機中...")
 
         fig.write_html(self._html_path, include_plotlyjs=True)
         self.browser.load(QUrl.fromLocalFile(self._html_path))
