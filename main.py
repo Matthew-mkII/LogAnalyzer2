@@ -40,26 +40,27 @@ os.environ["QT_API"] = "pyside6"
 import asyncio
 from datetime import datetime
 
-import plotly.express as px
+import plotly.graph_objects as go
 import qasync
 from PySide6.QtCore import QTimer, QUrl, QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from bluetooth_manager import BluetoothManager
-from log_reader import inspect_log_csv, load_log_csv
+from log_reader import load_log_csv
 from log_writer import LogWriter
 
 
@@ -81,10 +82,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("LogAnalyzer2 by matthew")
 
         self._x_data: list[float] = []
-        self._y_data: list[float] = []
+        self._series_data: dict[str, list[float]] = {}
+        self._enabled_series: set[str] = set()
+        self._series_checkboxes: dict[str, QCheckBox] = {}
+        self._graph_title: str | None = None
         self._sample_index = 0
         self._session_start: datetime | None = None
-        self._legend_name = "受信データ"
         self._html_path = os.path.abspath("temp.html")
 
         self.bt_manager = BluetoothManager()
@@ -97,6 +100,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.addLayout(self._create_bluetooth_panel())
         layout.addWidget(self._create_log_panel())
+        layout.addWidget(self._create_series_panel())
         layout.addWidget(self.browser, stretch=1)
         self.setCentralWidget(central)
 
@@ -150,6 +154,56 @@ class MainWindow(QMainWindow):
 
         return container
 
+    def _create_series_panel(self) -> QScrollArea:
+        self.series_panel = QScrollArea()
+        self.series_panel.setWidgetResizable(True)
+        self.series_panel.setMaximumHeight(48)
+
+        series_container = QWidget()
+        self.series_layout = QHBoxLayout(series_container)
+        self.series_layout.setContentsMargins(0, 0, 0, 0)
+        self.series_panel.setWidget(series_container)
+        self.series_panel.hide()
+        return self.series_panel
+
+    def _clear_series_panel(self) -> None:
+        for checkbox in self._series_checkboxes.values():
+            checkbox.deleteLater()
+        self._series_checkboxes.clear()
+
+        while self.series_layout.count():
+            item = self.series_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._enabled_series.clear()
+        self.series_panel.hide()
+
+    def _setup_series_panel(self, series_names: list[str]) -> None:
+        self._clear_series_panel()
+        if not series_names:
+            return
+
+        default_enabled = {"gyro"} if "gyro" in series_names else {series_names[0]}
+
+        for name in series_names:
+            checkbox = QCheckBox(name)
+            checkbox.setChecked(name in default_enabled)
+            checkbox.stateChanged.connect(self._on_series_toggled)
+            self._series_checkboxes[name] = checkbox
+            self.series_layout.addWidget(checkbox)
+
+        self._enabled_series = {
+            name for name, checkbox in self._series_checkboxes.items() if checkbox.isChecked()
+        }
+        self.series_panel.show()
+
+    def _on_series_toggled(self) -> None:
+        self._enabled_series = {
+            name for name, checkbox in self._series_checkboxes.items() if checkbox.isChecked()
+        }
+        self._render_graph(title=self._graph_title)
+
     def _setup_bluetooth_signals(self) -> None:
         self.bt_manager.device_discovered.connect(self._on_device_discovered)
         self.bt_manager.scan_finished.connect(self._on_scan_finished)
@@ -187,10 +241,12 @@ class MainWindow(QMainWindow):
         self.scan_btn.setEnabled(False)
 
         self._session_start = None
-        self._legend_name = "受信データ"
         self._x_data = []
-        self._y_data = []
+        self._series_data = {"受信データ": []}
+        self._enabled_series = {"受信データ"}
+        self._graph_title = None
         self._sample_index = 0
+        self._clear_series_panel()
         self._render_graph()
 
         log_path = self._log_writer.start()
@@ -221,37 +277,20 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            log_format, columns = inspect_log_csv(path)
-            y_column = None
-            if log_format == "legacy":
-                default_column = "gyro" if "gyro" in columns else columns[0]
-                y_column, ok = QInputDialog.getItem(
-                    self,
-                    "CSV列選択",
-                    "Y軸に表示する列:",
-                    columns,
-                    columns.index(default_column),
-                    False,
-                )
-                if not ok:
-                    return
-
-            log_data = load_log_csv(path, y_column=y_column)
+            log_data = load_log_csv(path)
         except Exception as exc:
             QMessageBox.warning(self, "CSV読み込み", str(exc))
             return
 
         self._x_data = log_data.x
-        self._y_data = log_data.y
+        self._series_data = log_data.series
         self._sample_index = log_data.last_sample_index
         self._session_start = None
-        self._legend_name = (
-            f"{log_data.source.stem}:{log_data.y_column}"
-            if log_data.available_columns
-            else log_data.source.stem
+        self._graph_title = (
+            f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
         )
-        title = f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
-        self._render_graph(title=title)
+        self._setup_series_panel(list(log_data.series.keys()))
+        self._render_graph(title=self._graph_title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
 
     def _on_data_received(self, text: str) -> None:
@@ -272,7 +311,10 @@ class MainWindow(QMainWindow):
                 sample_index = self._sample_index
                 elapsed_ms = (received_at - self._session_start).total_seconds() * 1000
                 self._x_data.append(elapsed_ms)
-                self._y_data.append(value)
+                if "受信データ" not in self._series_data:
+                    self._series_data = {"受信データ": []}
+                    self._enabled_series = {"受信データ"}
+                self._series_data["受信データ"].append(value)
                 self._schedule_graph_update()
 
             if self._log_writer.is_active:
@@ -309,8 +351,7 @@ class MainWindow(QMainWindow):
         x_min = min(x_data)
         return [x - x_min for x in x_data]
 
-    def _apply_graph_layout(self, fig, title: str | None = None) -> None:
-        fig.update_traces(name=self._legend_name)
+    def _apply_graph_layout(self, fig: go.Figure, title: str | None = None) -> None:
         fig.update_layout(
             showlegend=True,
             legend=dict(
@@ -320,35 +361,48 @@ class MainWindow(QMainWindow):
                 xanchor="left",
                 x=0,
             ),
+            xaxis_title="経過時間 (ms)",
+            yaxis_title="値",
         )
         if title:
             fig.update_layout(title=title)
 
     def _render_graph(self, title: str | None = None) -> None:
         self._graph_dirty = False
+        if title is not None:
+            self._graph_title = title
 
-        if self._x_data:
+        active_series = {
+            name: values
+            for name, values in self._series_data.items()
+            if name in self._enabled_series
+        }
+
+        if self._x_data and active_series:
             x_plot = self._normalize_x_axis(self._x_data)
             x_max = max(x_plot)
             if x_max <= 0:
                 x_max = 1
-            fig = px.line(
-                x=x_plot,
-                y=self._y_data,
-                labels={"x": "経過時間 (ms)", "y": "値"},
-                render_mode="svg",
-            )
+
+            fig = go.Figure()
+            for name, y_values in active_series.items():
+                count = min(len(x_plot), len(y_values))
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_plot[:count],
+                        y=y_values[:count],
+                        mode="lines",
+                        name=name,
+                    )
+                )
+
             fig.update_xaxes(range=[0, x_max * 1.05], autorange=False)
-            self._apply_graph_layout(fig, title=title)
+            self._apply_graph_layout(fig, title=title or self._graph_title)
         else:
-            fig = px.line(
-                x=[0],
-                y=[0],
-                labels={"x": "経過時間 (ms)", "y": "値"},
-                render_mode="svg",
-            )
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=[0], y=[0], mode="lines", name="データなし"))
             fig.update_xaxes(range=[0, 1], autorange=False)
-            self._apply_graph_layout(fig, title="データ待機中...")
+            self._apply_graph_layout(fig, title=title or self._graph_title or "データ待機中...")
 
         fig.write_html(self._html_path, include_plotlyjs=True)
         self.browser.load(QUrl.fromLocalFile(self._html_path))

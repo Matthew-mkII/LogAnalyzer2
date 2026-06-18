@@ -9,13 +9,11 @@ from pathlib import Path
 @dataclass
 class LogData:
     x: list[float]
-    y: list[float]
+    series: dict[str, list[float]]
     source: Path
     total_rows: int
     plotted_rows: int
     last_sample_index: int
-    y_column: str = ""
-    available_columns: list[str] | None = None
 
 
 def inspect_log_csv(path: Path | str) -> tuple[str, list[str]]:
@@ -48,12 +46,12 @@ def inspect_log_csv(path: Path | str) -> tuple[str, list[str]]:
     raise ValueError("CSV にデータ行がありません")
 
 
-def load_log_csv(path: Path | str, y_column: str | None = None) -> LogData:
+def load_log_csv(path: Path | str) -> LogData:
     path = Path(path)
     log_format, columns = inspect_log_csv(path)
     if log_format == "app":
         return _load_app_log(path)
-    return _load_legacy_log(path, columns, y_column=y_column)
+    return _load_legacy_log(path, columns)
 
 
 def _parse_legacy_header_line(line: str) -> list[str] | None:
@@ -63,22 +61,13 @@ def _parse_legacy_header_line(line: str) -> list[str] | None:
     return [column.strip() for column in stripped.split(",")]
 
 
-def _load_legacy_log(
-    path: Path,
-    value_columns: list[str],
-    y_column: str | None = None,
-) -> LogData:
+def _load_legacy_log(path: Path, value_columns: list[str]) -> LogData:
     if not value_columns:
         raise ValueError("レガシー CSV に数値列がありません")
 
-    selected_column = y_column or ("gyro" if "gyro" in value_columns else value_columns[0])
-    if selected_column not in value_columns:
-        raise ValueError(f"列 '{selected_column}' は CSV に存在しません")
-
     times: list[float] = []
-    values: list[float] = []
+    series: dict[str, list[float]] = {column: [] for column in value_columns}
     total_rows = 0
-    column_index = value_columns.index(selected_column) + 1
 
     with path.open(encoding="utf-8", newline="") as file:
         for line in file:
@@ -88,17 +77,18 @@ def _load_legacy_log(
 
             total_rows += 1
             parts = [part.strip() for part in stripped.split(",")]
-            if len(parts) <= column_index:
+            if len(parts) <= len(value_columns):
                 continue
 
             try:
                 time_ms = float(parts[0])
-                value = float(parts[column_index])
+                row_values = [float(parts[index + 1]) for index in range(len(value_columns))]
             except ValueError:
                 continue
 
             times.append(time_ms)
-            values.append(value)
+            for column, value in zip(value_columns, row_values, strict=True):
+                series[column].append(value)
 
     if not times:
         raise ValueError("グラフ用の数値データがありません")
@@ -108,13 +98,11 @@ def _load_legacy_log(
 
     return LogData(
         x=x,
-        y=values,
+        series=series,
         source=path,
         total_rows=total_rows,
-        plotted_rows=len(values),
-        last_sample_index=len(values),
-        y_column=selected_column,
-        available_columns=value_columns,
+        plotted_rows=len(times),
+        last_sample_index=len(times),
     )
 
 
@@ -125,7 +113,7 @@ def _to_elapsed_ms(timestamps: list[datetime]) -> list[float]:
 
 def _load_app_log(path: Path) -> LogData:
     timestamps: list[datetime] = []
-    y: list[float] = []
+    values: list[float] = []
     total_rows = 0
     last_sample_index = 0
     fallback_base: datetime | None = None
@@ -160,17 +148,16 @@ def _load_app_log(path: Path) -> LogData:
                     fallback_base = datetime.now()
                 timestamps.append(fallback_base)
 
-            y.append(value)
+            values.append(value)
 
     if not timestamps:
         raise ValueError("グラフ用の数値データがありません")
 
     return LogData(
         x=_to_elapsed_ms(timestamps),
-        y=y,
+        series={"parsed_value": values},
         source=path,
         total_rows=total_rows,
-        plotted_rows=len(y),
+        plotted_rows=len(values),
         last_sample_index=last_sample_index,
-        y_column="parsed_value",
     )
