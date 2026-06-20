@@ -2,11 +2,13 @@
 
 from PySide6.QtCore import QObject, Signal
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
 
 # Nordic UART Service（多くのログ機器で使われるシリアル通信プロファイル）
 NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
+CONNECT_TIMEOUT_SEC = 30.0
 MAX_RECEIVE_BUFFER = 65536
 
 
@@ -24,12 +26,15 @@ class BluetoothManager(QObject):
         self._client: BleakClient | None = None
         self._notify_char_uuid: str | None = None
         self._receive_buffer = ""
+        self._discovered_devices: dict[str, BLEDevice] = {}
 
     async def scan(self, timeout: float = 5.0) -> None:
+        self._discovered_devices.clear()
         self.status_changed.emit("スキャン中...")
         try:
             devices = await BleakScanner.discover(timeout=timeout)
             for device in devices:
+                self._discovered_devices[device.address] = device
                 name = device.name or "不明"
                 self.device_discovered.emit(name, device.address)
             self.status_changed.emit(f"{len(devices)} 台を検出しました")
@@ -43,28 +48,46 @@ class BluetoothManager(QObject):
             self.error_occurred.emit("既に接続されています")
             return
 
+        device = self._discovered_devices.get(address)
+        if device is None:
+            self.error_occurred.emit(
+                "デバイス情報が見つかりません。スキャンし直してから接続してください。"
+            )
+            return
+
         self.status_changed.emit("接続中...")
         try:
-            client = BleakClient(address, disconnected_callback=self._on_disconnected)
-            await client.connect()
+            client = BleakClient(
+                device,
+                disconnected_callback=self._on_disconnected,
+                services={NUS_SERVICE_UUID},
+                timeout=CONNECT_TIMEOUT_SEC,
+            )
+            await client.connect(timeout=CONNECT_TIMEOUT_SEC)
             self._client = client
 
-            notify_uuid = await self._find_notify_characteristic(client)
+            notify_uuid = self._find_notify_characteristic(client)
             if notify_uuid is None:
                 await client.disconnect()
                 self._client = None
-                self.error_occurred.emit("通知可能なキャラクタリスティックが見つかりません")
+                self.error_occurred.emit(
+                    "NUS 通知キャラクタリスティックが見つかりません。"
+                    " log-sender が起動しているか確認してください。"
+                )
                 return
 
             self._reset_receive_buffer()
             self._notify_char_uuid = notify_uuid
             await client.start_notify(notify_uuid, self._on_notify)
 
-            self.status_changed.emit(f"接続済み: {address}")
+            self.status_changed.emit(f"接続済み: {device.name or address}")
             self.connected.emit(address)
         except Exception as exc:
             self._client = None
-            self.error_occurred.emit(f"接続エラー: {exc}")
+            self.error_occurred.emit(
+                f"接続エラー: {type(exc).__name__}: {exc}\n"
+                "ヒント: log-sender を先に起動し、スキャン直後に接続してください。"
+            )
 
     async def disconnect(self) -> None:
         if self._client is None:
@@ -129,16 +152,19 @@ class BluetoothManager(QObject):
         self.status_changed.emit("未接続")
         self.disconnected.emit()
 
-    async def _find_notify_characteristic(self, client: BleakClient) -> str | None:
+    def _find_notify_characteristic(self, client: BleakClient) -> str | None:
+        for service in client.services:
+            if str(service.uuid).lower() != NUS_SERVICE_UUID.lower():
+                continue
+            for char in service.characteristics:
+                if str(char.uuid).lower() == NUS_TX_CHAR_UUID.lower():
+                    if "notify" in char.properties:
+                        return str(char.uuid)
+
         for service in client.services:
             if str(service.uuid).lower() == NUS_SERVICE_UUID.lower():
                 for char in service.characteristics:
                     if "notify" in char.properties:
                         return str(char.uuid)
-
-        for service in client.services:
-            for char in service.characteristics:
-                if "notify" in char.properties:
-                    return str(char.uuid)
 
         return None
