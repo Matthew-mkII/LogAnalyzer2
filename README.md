@@ -357,6 +357,63 @@ LogAnalyzer2 にデータを送るデバイス側は、BLE ペリフェラルと
 
 1 行が BLE MTU を超える場合でも、**改行まで分割送信** すればアプリ側で結合されます。
 
+### 実装例（Pybricks）
+
+LEGO SPIKE Prime / Robot Inventor / Technic Hub 等で Pybricks を使う場合の例です。  
+サンプル: [`samples/pybricks_log_sender.py`](samples/pybricks_log_sender.py)
+
+Pybricks は **NUS ではなく `usys.stdout` 経由** で PC にデータを送ります。LogAnalyzer2 は Pybricks の stdout イベント（GATT `c5f50002-...`）と NUS の両方を受信できます。
+
+SPIKE Prime ラージハブにはジャイロセンサーが内蔵されており、Pybricks では `hub.imu.angular_velocity()` で角速度を取得します。カラーセンサーは外付けです。
+
+```python
+from pybricks.hubs import ThisHub
+from pybricks.parameters import Axis, Port
+from pybricks.pupdevices import ColorSensor
+from pybricks.tools import StopWatch, wait
+from usys import stdout
+
+hub = ThisHub()
+color_sensor = ColorSensor(Port.A)
+watch = StopWatch()
+
+while True:
+    hue, saturation, value = color_sensor.hsv()
+    gyro = hub.imu.angular_velocity(Axis.Z)
+    line = "{},0,0,{},{},{},{},0,0,0\n".format(
+        watch.time(), hub.battery.voltage(), hue, saturation, value, gyro
+    )
+    stdout.write(line)
+    wait(100)
+```
+
+カラーセンサーは `hsv()` の生値を `angleL=h`, `angleR=s`, `bright=v` 列にそのまま送ります。
+
+手順:
+
+1. Pybricks Code で `pybricks_log_sender.py` をハブに書き込む
+2. **Pybricks Code から切断する**（他アプリと同時接続不可）
+3. LogAnalyzer2 で **スキャン** → ハブ名を選択 → **接続**
+4. ハブのボタンでプログラムを開始
+5. グラフと `logs/*.csv` にデータが記録される
+
+注意:
+
+- BOOST Move Hub は `usys` 非対応のため動作しません
+- センサー値は環境に合わせてサンプル内の読み取り部を書き換えてください
+
+### 実装例（PC + bless、テスト用）
+
+PC を仮想デバイス `LogSensor` として動かすテスト用サンプルです。  
+サンプル: [`samples/pc_ble_log_sender.py`](samples/pc_ble_log_sender.py)
+
+```bash
+pip install -r samples/requirements-sender.txt
+python samples/pc_ble_log_sender.py
+```
+
+macOS では bless の制約により動作しない場合があります。実機検証は Pybricks ハブまたは ESP32 等を推奨します。
+
 ### 実装例（ESP32 + Arduino）
 
 ESP32 などのマイコンで NUS ペリフェラルとして動作させる例です。
@@ -420,9 +477,9 @@ void loop() {
 | 送信タイミング | LogAnalyzer2 接続後（`onConnect` 後）に notify を開始する |
 | 1 回の送信サイズ | BLE の MTU 制限を考慮し、1 行を複数 notify に分割しても可（改行までバッファリング） |
 | 切断時 | 再アドバタイズして再接続できるようにする |
-| 開発ボード | ESP32 / nRF52840 などが手軽 |
+| 開発ボード | Pybricks 対応ハブ / ESP32 / nRF52840 など |
 
-macOS 上の PC を送信側（ペリフェラル）にする方法は環境制約が多いため、実機検証は ESP32 等のマイコンを使うことを推奨します。
+Pybricks ハブでは NUS ではなく stdout イベントで送ります。ESP32 等では NUS notify を使います。
 
 ## 画面構成
 

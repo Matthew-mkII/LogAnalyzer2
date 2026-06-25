@@ -193,7 +193,9 @@ class MainWindow(QMainWindow):
         if not series_names:
             return
 
-        default_enabled = {"gyro"} if "gyro" in series_names else {series_names[0]}
+        default_enabled = {name for name in ("gyro", "bright") if name in series_names}
+        if not default_enabled and series_names:
+            default_enabled = {series_names[0]}
 
         for name in series_names:
             checkbox = QCheckBox(name)
@@ -223,12 +225,17 @@ class MainWindow(QMainWindow):
         self.bt_manager.status_changed.connect(self.status_label.setText)
 
     def _on_scan_clicked(self) -> None:
+        if self.bt_manager.is_connected:
+            return
         self.scan_btn.setEnabled(False)
+        self.connect_btn.setEnabled(False)
         self.device_combo.clear()
         asyncio.create_task(self.bt_manager.scan())
 
     def _on_scan_finished(self) -> None:
-        self.scan_btn.setEnabled(True)
+        if not self.bt_manager.is_connected:
+            self.scan_btn.setEnabled(True)
+            self.connect_btn.setEnabled(True)
 
     def _on_device_discovered(self, name: str, address: str) -> None:
         self.device_combo.addItem(f"{name} ({address})", address)
@@ -239,6 +246,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "接続", "デバイスを選択してください")
             return
         self.connect_btn.setEnabled(False)
+        self.scan_btn.setEnabled(False)
         asyncio.create_task(self.bt_manager.connect(address))
 
     def _on_disconnect_clicked(self) -> None:
