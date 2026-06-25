@@ -4,15 +4,13 @@ import asyncio
 
 from PySide6.QtCore import QObject, Signal
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
 
 # Nordic UART Service（多くのログ機器で使われるシリアル通信プロファイル）
 NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-# Pybricks GATT（ハブの stdout イベント受信用）
-PYBRICKS_COMMAND_EVENT_UUID = "c5f50002-8280-46da-89f4-6d8051e4aeef"
-PYBRICKS_EVENT_WRITE_STDOUT = 0x01
-
+CONNECT_TIMEOUT_SEC = 30.0
 MAX_RECEIVE_BUFFER = 65536
 
 
@@ -38,26 +36,22 @@ class BluetoothManager(QObject):
         self._notify_char_uuid: str | None = None
         self._pybricks_notify_uuid: str | None = None
         self._receive_buffer = ""
-        self._operation_lock = asyncio.Lock()
+        self._discovered_devices: dict[str, BLEDevice] = {}
 
     async def scan(self, timeout: float = 5.0) -> None:
-        async with self._operation_lock:
-            if self.is_connected:
-                self.error_occurred.emit("接続中はスキャンできません")
-                self.scan_finished.emit()
-                return
-
-            self.status_changed.emit("スキャン中...")
-            try:
-                devices = await BleakScanner.discover(timeout=timeout)
-                for device in sorted(devices, key=_discovered_device_sort_key):
-                    name = device.name or "不明"
-                    self.device_discovered.emit(name, device.address)
-                self.status_changed.emit(f"{len(devices)} 台を検出しました")
-            except Exception as exc:
-                self.error_occurred.emit(f"スキャンエラー: {exc}")
-            finally:
-                self.scan_finished.emit()
+        self._discovered_devices.clear()
+        self.status_changed.emit("スキャン中...")
+        try:
+            devices = await BleakScanner.discover(timeout=timeout)
+            for device in devices:
+                self._discovered_devices[device.address] = device
+                name = device.name or "不明"
+                self.device_discovered.emit(name, device.address)
+            self.status_changed.emit(f"{len(devices)} 台を検出しました")
+        except Exception as exc:
+            self.error_occurred.emit(f"スキャンエラー: {exc}")
+        finally:
+            self.scan_finished.emit()
 
     async def connect(self, address: str) -> None:
         async with self._operation_lock:
@@ -65,19 +59,33 @@ class BluetoothManager(QObject):
                 self.error_occurred.emit("既に接続されています")
                 return
 
-            self.status_changed.emit("接続中...")
-            try:
-                client = BleakClient(address, disconnected_callback=self._on_disconnected)
-                await client.connect()
-                self._client = client
+        device = self._discovered_devices.get(address)
+        if device is None:
+            self.error_occurred.emit(
+                "デバイス情報が見つかりません。スキャンし直してから接続してください。"
+            )
+            return
 
-                notify_uuid = await self._find_notify_characteristic(client)
-                pybricks_uuid = self._find_pybricks_event_characteristic(client)
-                if notify_uuid is None and pybricks_uuid is None:
-                    await client.disconnect()
-                    self._client = None
-                    self.error_occurred.emit("通知可能なキャラクタリスティックが見つかりません")
-                    return
+        self.status_changed.emit("接続中...")
+        try:
+            client = BleakClient(
+                device,
+                disconnected_callback=self._on_disconnected,
+                services={NUS_SERVICE_UUID},
+                timeout=CONNECT_TIMEOUT_SEC,
+            )
+            await client.connect(timeout=CONNECT_TIMEOUT_SEC)
+            self._client = client
+
+            notify_uuid = self._find_notify_characteristic(client)
+            if notify_uuid is None:
+                await client.disconnect()
+                self._client = None
+                self.error_occurred.emit(
+                    "NUS 通知キャラクタリスティックが見つかりません。"
+                    " log-sender が起動しているか確認してください。"
+                )
+                return
 
                 self._reset_receive_buffer()
                 self._notify_char_uuid = notify_uuid
@@ -88,11 +96,14 @@ class BluetoothManager(QObject):
                 if pybricks_uuid is not None:
                     await client.start_notify(pybricks_uuid, self._on_pybricks_notify)
 
-                self.status_changed.emit(f"接続済み: {address}")
-                self.connected.emit(address)
-            except Exception as exc:
-                self._client = None
-                self.error_occurred.emit(f"接続エラー: {exc}")
+            self.status_changed.emit(f"接続済み: {device.name or address}")
+            self.connected.emit(address)
+        except Exception as exc:
+            self._client = None
+            self.error_occurred.emit(
+                f"接続エラー: {type(exc).__name__}: {exc}\n"
+                "ヒント: log-sender を先に起動し、スキャン直後に接続してください。"
+            )
 
     async def disconnect(self) -> None:
         async with self._operation_lock:
@@ -171,25 +182,19 @@ class BluetoothManager(QObject):
         self.status_changed.emit("未接続")
         self.disconnected.emit()
 
-    async def _find_notify_characteristic(self, client: BleakClient) -> str | None:
+    def _find_notify_characteristic(self, client: BleakClient) -> str | None:
+        for service in client.services:
+            if str(service.uuid).lower() != NUS_SERVICE_UUID.lower():
+                continue
+            for char in service.characteristics:
+                if str(char.uuid).lower() == NUS_TX_CHAR_UUID.lower():
+                    if "notify" in char.properties:
+                        return str(char.uuid)
+
         for service in client.services:
             if str(service.uuid).lower() == NUS_SERVICE_UUID.lower():
                 for char in service.characteristics:
                     if "notify" in char.properties:
                         return str(char.uuid)
 
-        for service in client.services:
-            for char in service.characteristics:
-                if "notify" in char.properties:
-                    return str(char.uuid)
-
-        return None
-
-    @staticmethod
-    def _find_pybricks_event_characteristic(client: BleakClient) -> str | None:
-        target = PYBRICKS_COMMAND_EVENT_UUID.lower()
-        for service in client.services:
-            for char in service.characteristics:
-                if str(char.uuid).lower() == target and "notify" in char.properties:
-                    return str(char.uuid)
         return None

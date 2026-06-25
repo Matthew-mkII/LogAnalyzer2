@@ -50,10 +50,12 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -63,6 +65,7 @@ from app_paths import logs_dir, temp_html_path
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
 from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, LogWriterError, parse_legacy_row
+from tcp_manager import TcpLogManager
 
 
 def _qt_message_handler(mode, _context, message) -> None:
@@ -95,6 +98,8 @@ class MainWindow(QMainWindow):
         self._html_path = str(temp_html_path())
 
         self.bt_manager = BluetoothManager()
+        self.tcp_manager = TcpLogManager()
+        self._active_transport: str | None = None
         self._log_writer = LogWriter(str(logs_dir()))
 
         self.browser = QWebEngineView()
@@ -103,6 +108,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addLayout(self._create_bluetooth_panel())
+        layout.addLayout(self._create_tcp_panel())
         layout.addWidget(self._create_log_panel())
         layout.addWidget(self._create_series_panel())
         layout.addWidget(self.browser, stretch=1)
@@ -140,6 +146,28 @@ class MainWindow(QMainWindow):
         panel.addWidget(self.connect_btn)
         panel.addWidget(self.disconnect_btn)
         panel.addWidget(self.status_label)
+
+        return panel
+
+    def _create_tcp_panel(self) -> QHBoxLayout:
+        panel = QHBoxLayout()
+
+        panel.addWidget(QLabel("TCP:"))
+
+        self.tcp_host_input = QLineEdit("127.0.0.1")
+        self.tcp_host_input.setMinimumWidth(120)
+        panel.addWidget(self.tcp_host_input)
+
+        panel.addWidget(QLabel("ポート"))
+
+        self.tcp_port_input = QSpinBox()
+        self.tcp_port_input.setRange(1, 65535)
+        self.tcp_port_input.setValue(8765)
+        panel.addWidget(self.tcp_port_input)
+
+        self.tcp_connect_btn = QPushButton("TCP接続")
+        self.tcp_connect_btn.clicked.connect(self._on_tcp_connect_clicked)
+        panel.addWidget(self.tcp_connect_btn)
 
         return panel
 
@@ -218,11 +246,17 @@ class MainWindow(QMainWindow):
     def _setup_bluetooth_signals(self) -> None:
         self.bt_manager.device_discovered.connect(self._on_device_discovered)
         self.bt_manager.scan_finished.connect(self._on_scan_finished)
-        self.bt_manager.connected.connect(self._on_connected)
-        self.bt_manager.disconnected.connect(self._on_disconnected)
+        self.bt_manager.connected.connect(self._on_transport_connected)
+        self.bt_manager.disconnected.connect(self._on_transport_disconnected)
         self.bt_manager.data_received.connect(self._on_data_received)
-        self.bt_manager.error_occurred.connect(self._on_bt_error)
+        self.bt_manager.error_occurred.connect(self._on_transport_error)
         self.bt_manager.status_changed.connect(self.status_label.setText)
+
+        self.tcp_manager.connected.connect(self._on_transport_connected)
+        self.tcp_manager.disconnected.connect(self._on_transport_disconnected)
+        self.tcp_manager.data_received.connect(self._on_data_received)
+        self.tcp_manager.error_occurred.connect(self._on_transport_error)
+        self.tcp_manager.status_changed.connect(self.status_label.setText)
 
     def _on_scan_clicked(self) -> None:
         if self.bt_manager.is_connected:
@@ -245,17 +279,25 @@ class MainWindow(QMainWindow):
         if not address:
             QMessageBox.warning(self, "接続", "デバイスを選択してください")
             return
-        self.connect_btn.setEnabled(False)
-        self.scan_btn.setEnabled(False)
+        self._set_transport_controls_enabled(False)
+        self._active_transport = "ble"
         asyncio.create_task(self.bt_manager.connect(address))
 
-    def _on_disconnect_clicked(self) -> None:
-        asyncio.create_task(self.bt_manager.disconnect())
+    def _on_tcp_connect_clicked(self) -> None:
+        host = self.tcp_host_input.text().strip() or "127.0.0.1"
+        port = self.tcp_port_input.value()
+        self._set_transport_controls_enabled(False)
+        self._active_transport = "tcp"
+        asyncio.create_task(self.tcp_manager.connect(host, port))
 
-    def _on_connected(self, address: str) -> None:
-        self.connect_btn.setEnabled(False)
+    def _on_disconnect_clicked(self) -> None:
+        if self._active_transport == "tcp":
+            asyncio.create_task(self.tcp_manager.disconnect())
+        else:
+            asyncio.create_task(self.bt_manager.disconnect())
+
+    def _on_transport_connected(self, _endpoint: str) -> None:
         self.disconnect_btn.setEnabled(True)
-        self.scan_btn.setEnabled(False)
 
         self._session_start = None
         self._x_data = []
@@ -273,15 +315,22 @@ class MainWindow(QMainWindow):
             log_path = self._log_writer.start()
         except LogWriterError as exc:
             QMessageBox.warning(self, "ログ保存", str(exc))
-            asyncio.create_task(self.bt_manager.disconnect())
+            self._on_disconnect_clicked()
             return
 
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
-    def _on_disconnected(self) -> None:
-        self.connect_btn.setEnabled(True)
+    def _set_transport_controls_enabled(self, enabled: bool) -> None:
+        self.connect_btn.setEnabled(enabled)
+        self.tcp_connect_btn.setEnabled(enabled)
+        self.scan_btn.setEnabled(enabled)
+        self.tcp_host_input.setEnabled(enabled)
+        self.tcp_port_input.setEnabled(enabled)
+
+    def _on_transport_disconnected(self) -> None:
+        self._active_transport = None
+        self._set_transport_controls_enabled(True)
         self.disconnect_btn.setEnabled(False)
-        self.scan_btn.setEnabled(True)
 
         if self._log_writer.is_active:
             try:
@@ -303,9 +352,12 @@ class MainWindow(QMainWindow):
                 pass
         self.log_path_label.setText("ログ: 記録エラー（書き込み停止）")
 
-    def _on_bt_error(self, message: str) -> None:
-        QMessageBox.warning(self, "Bluetooth", message)
-        self._on_disconnected()
+    def _on_transport_error(self, message: str) -> None:
+        title = "TCP" if self._active_transport == "tcp" else "Bluetooth"
+        QMessageBox.warning(self, title, message)
+        self._active_transport = None
+        self._set_transport_controls_enabled(True)
+        self.disconnect_btn.setEnabled(False)
 
     def _on_load_csv_clicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -350,13 +402,16 @@ class MainWindow(QMainWindow):
         self._enabled_series = set()
         self._graph_title = None
         self._sample_index = 0
-        if not self.bt_manager.is_connected:
+        if not self._is_transport_connected():
             self._session_start = None
         self._clear_series_panel()
         self._render_graph()
         self.log_path_label.setText(self._pre_csv_log_label)
         self._csv_view_active = False
         self.reset_view_btn.setEnabled(False)
+
+    def _is_transport_connected(self) -> bool:
+        return self.bt_manager.is_connected or self.tcp_manager.is_connected
 
     def _ensure_realtime_series(self) -> None:
         if self._series_data:
