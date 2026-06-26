@@ -102,6 +102,7 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         layout = QVBoxLayout(central)
+        layout.setSpacing(4)
         layout.addLayout(self._create_bluetooth_panel())
         layout.addWidget(self._create_log_panel())
         layout.addWidget(self._create_series_panel())
@@ -170,7 +171,8 @@ class MainWindow(QMainWindow):
     def _create_series_panel(self) -> QScrollArea:
         self.series_panel = QScrollArea()
         self.series_panel.setWidgetResizable(True)
-        self.series_panel.setMaximumHeight(48)
+        self.series_panel.setMaximumHeight(40)
+        self.series_panel.setFrameShape(QScrollArea.Shape.NoFrame)
 
         series_container = QWidget()
         self.series_layout = QHBoxLayout(series_container)
@@ -465,18 +467,27 @@ class MainWindow(QMainWindow):
     def _apply_graph_layout(self, fig: go.Figure, title: str | None = None) -> None:
         fig.update_layout(
             showlegend=True,
+            margin=dict(l=60, r=20, t=28 if title else 8, b=50),
             legend=dict(
                 orientation="h",
-                yanchor="bottom",
-                y=1.02,
+                yanchor="top",
+                y=0.98,
                 xanchor="left",
                 x=0,
+                bgcolor="rgba(255,255,255,0.75)",
             ),
             xaxis_title="経過時間 (ms)",
             yaxis_title="値",
         )
         if title:
-            fig.update_layout(title=title)
+            fig.update_layout(
+                title=dict(
+                    text=title,
+                    x=0,
+                    xanchor="left",
+                    pad=dict(t=4, b=2),
+                )
+            )
 
     def _build_figure(self, title: str | None = None) -> go.Figure:
         active_series = {
