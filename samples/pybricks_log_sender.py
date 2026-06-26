@@ -6,6 +6,7 @@
 センサー:
   - カラーセンサー（外付け）→ angleL=h, angleR=s, bright=v（HSV 生値）
   - ジャイロセンサー（ラージハブ内蔵）→ gyro 列（角速度 deg/s）
+  - IMU 姿勢角 → roll / yaw / pitch（角度 deg）
 
 配線:
   SPIKE カラーセンサーを COLOR_SENSOR_PORT に接続してください。
@@ -42,7 +43,6 @@ GYRO_AXIS = Axis.Z  # ヨー角速度。ピッチ=Axis.X、ロール=Axis.Y
 
 SEND_INTERVAL_MS = 100
 
-# LogAnalyzer2 レガシー CSV と同じ列順
 VALUE_COLUMNS = (
     "turn",
     "speed",
@@ -54,6 +54,9 @@ VALUE_COLUMNS = (
     "Kp",
     "Ki",
     "Kd",
+    "roll",
+    "yaw",
+    "pitch",
 )
 
 
@@ -82,7 +85,6 @@ def format_log_line(time_ms=None, values=None):
 
 
 def send_log_line(line):
-    # MicroPython では str.encode() が使えない場合があるため stdout.write を使う
     stdout.write(line)
 
 
@@ -100,6 +102,16 @@ def read_gyro(hub):
         return hub.imu.angular_velocity(GYRO_AXIS)
     except AttributeError:
         return None
+
+
+def read_orientation(hub):
+    """ラージハブ内蔵 IMU の姿勢角 roll / yaw / pitch（deg）を読む。"""
+    try:
+        pitch, roll = hub.imu.tilt()
+        yaw = hub.imu.heading()
+        return roll, yaw, pitch
+    except (AttributeError, TypeError, ValueError):
+        return None, None, None
 
 
 def read_battery(hub):
@@ -122,6 +134,8 @@ while True:
     else:
         hue, saturation, value = hsv
 
+    roll, yaw, pitch = read_orientation(hub)
+
     line = format_log_line(
         time_ms=elapsed_ms,
         values={
@@ -135,6 +149,9 @@ while True:
             "Kp": 0.0,
             "Ki": 0.0,
             "Kd": 0.0,
+            "roll": roll,
+            "yaw": yaw,
+            "pitch": pitch,
         },
     )
     send_log_line(line)

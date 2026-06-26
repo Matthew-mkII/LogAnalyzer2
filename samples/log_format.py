@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# LogAnalyzer2 / レガシー CSV と同じ列順
 VALUE_COLUMNS = (
     "turn",
     "speed",
@@ -14,6 +13,9 @@ VALUE_COLUMNS = (
     "Kp",
     "Ki",
     "Kd",
+    "roll",
+    "yaw",
+    "pitch",
 )
 
 
@@ -30,8 +32,8 @@ def format_log_line(
 ) -> str:
     """1 レコード分のログ行を生成する（末尾に改行付き）。
 
-    time_ms を指定すると「time + 10 データ列」の 11 列形式になる。
-    省略すると「10 データ列」のみ（LogAnalyzer2 側で受信時刻から time を補完）。
+    time_ms を指定すると「time + 13 データ列」の 14 列形式になる。
+    省略すると「13 データ列」のみ（LogAnalyzer2 側で受信時刻から time を補完）。
     """
     row_values = values or {}
     fields: list[str] = []

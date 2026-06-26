@@ -1,9 +1,9 @@
-"""Bluetooth 受信ログのファイル出力（レガシー CSV 形式）"""
+"""Bluetooth 受信ログのファイル出力"""
 
 from datetime import datetime
 from pathlib import Path
 
-LEGACY_VALUE_COLUMNS = (
+VALUE_COLUMNS = (
     "turn",
     "speed",
     "battery",
@@ -14,9 +14,12 @@ LEGACY_VALUE_COLUMNS = (
     "Kp",
     "Ki",
     "Kd",
+    "roll",
+    "yaw",
+    "pitch",
 )
 
-LEGACY_ROW_COLUMN_COUNT = len(LEGACY_VALUE_COLUMNS)
+ROW_COLUMN_COUNT = len(VALUE_COLUMNS)
 
 
 def parse_optional_float(raw: str) -> float | None:
@@ -29,12 +32,8 @@ def parse_optional_float(raw: str) -> float | None:
         return None
 
 
-def _parse_optional_float(raw: str) -> float | None:
-    return parse_optional_float(raw)
-
-
-def parse_legacy_row(line: str) -> tuple[float | None, dict[str, float | None]]:
-    """Bluetooth 受信行をレガシー CSV のデータ列として解釈する。
+def parse_log_row(line: str) -> tuple[float | None, dict[str, float | None]]:
+    """Bluetooth 受信行を CSV のデータ列として解釈する。
 
     列数不足・数値変換不可の項目は None として扱う。
 
@@ -44,23 +43,23 @@ def parse_legacy_row(line: str) -> tuple[float | None, dict[str, float | None]]:
     """
     stripped = line.strip()
     if not stripped:
-        return None, {column: None for column in LEGACY_VALUE_COLUMNS}
+        return None, {column: None for column in VALUE_COLUMNS}
 
     parts = [part.strip() for part in stripped.split(",")]
 
-    if len(parts) >= LEGACY_ROW_COLUMN_COUNT + 1:
-        device_time = _parse_optional_float(parts[0])
-        value_parts = parts[1 : LEGACY_ROW_COLUMN_COUNT + 1]
+    if len(parts) >= ROW_COLUMN_COUNT + 1:
+        device_time = parse_optional_float(parts[0])
+        value_parts = parts[1 : ROW_COLUMN_COUNT + 1]
     else:
         device_time = None
-        value_parts = parts[:LEGACY_ROW_COLUMN_COUNT]
+        value_parts = parts[:ROW_COLUMN_COUNT]
 
-    while len(value_parts) < LEGACY_ROW_COLUMN_COUNT:
+    while len(value_parts) < ROW_COLUMN_COUNT:
         value_parts.append("")
 
     values = {
-        column: _parse_optional_float(raw_value)
-        for column, raw_value in zip(LEGACY_VALUE_COLUMNS, value_parts, strict=True)
+        column: parse_optional_float(raw_value)
+        for column, raw_value in zip(VALUE_COLUMNS, value_parts, strict=True)
     }
     return device_time, values
 
@@ -93,7 +92,7 @@ class LogWriter:
         if self._file is None:
             return
 
-        column_names = ", ".join(["time", *LEGACY_VALUE_COLUMNS])
+        column_names = ", ".join(["time", *VALUE_COLUMNS])
         self._file.write(f"# {column_names}\n")
 
     @staticmethod
@@ -114,7 +113,7 @@ class LogWriter:
 
         row_values = values or {}
         fields = [self._format_time(elapsed_ms)]
-        for column in LEGACY_VALUE_COLUMNS:
+        for column in VALUE_COLUMNS:
             fields.append(self._format_value(row_values.get(column)))
 
         try:
@@ -146,4 +145,4 @@ class LogWriter:
 
     @property
     def columns(self) -> tuple[str, ...]:
-        return ("time", *LEGACY_VALUE_COLUMNS)
+        return ("time", *VALUE_COLUMNS)

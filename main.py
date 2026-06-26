@@ -62,7 +62,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from app_paths import logs_dir, temp_html_path
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
-from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, LogWriterError, parse_legacy_row
+from log_writer import VALUE_COLUMNS, LogWriter, LogWriterError, parse_log_row
 
 
 def _qt_message_handler(mode, _context, message) -> None:
@@ -197,7 +197,9 @@ class MainWindow(QMainWindow):
         if not series_names:
             return
 
-        default_enabled = {name for name in ("gyro", "bright") if name in series_names}
+        default_enabled = {
+            name for name in ("gyro", "bright", "roll", "yaw", "pitch") if name in series_names
+        }
         if not default_enabled and series_names:
             default_enabled = {series_names[0]}
 
@@ -413,8 +415,8 @@ class MainWindow(QMainWindow):
         if self._series_data:
             return
 
-        self._series_data = {column: [] for column in LEGACY_VALUE_COLUMNS}
-        self._setup_series_panel(list(LEGACY_VALUE_COLUMNS))
+        self._series_data = {column: [] for column in VALUE_COLUMNS}
+        self._setup_series_panel(list(VALUE_COLUMNS))
 
     def _on_data_received(self, text: str) -> None:
         for line in text.splitlines():
@@ -423,7 +425,7 @@ class MainWindow(QMainWindow):
                 continue
 
             received_at = datetime.now()
-            device_time, row_values = parse_legacy_row(stripped)
+            device_time, row_values = parse_log_row(stripped)
 
             if self._session_start is None:
                 self._session_start = received_at
@@ -436,7 +438,7 @@ class MainWindow(QMainWindow):
             self._sample_index += 1
             self._ensure_realtime_series()
             self._x_data.append(elapsed_ms)
-            for column in LEGACY_VALUE_COLUMNS:
+            for column in VALUE_COLUMNS:
                 self._series_data[column].append(row_values[column])
             self._schedule_graph_update()
 

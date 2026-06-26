@@ -34,7 +34,7 @@ def inspect_log_csv(path: Path | str) -> tuple[str, list[str]]:
     if not path.is_file():
         raise FileNotFoundError(f"ファイルが見つかりません: {path}")
 
-    legacy_columns: list[str] | None = None
+    value_columns: list[str] | None = None
 
     with path.open(encoding="utf-8", newline="") as file:
         for line in file:
@@ -43,16 +43,16 @@ def inspect_log_csv(path: Path | str) -> tuple[str, list[str]]:
                 continue
 
             if stripped.startswith("#"):
-                header = _parse_legacy_header_line(stripped)
+                header = _parse_header_line(stripped)
                 if header and header[0] == "time":
-                    legacy_columns = header[1:]
+                    value_columns = header[1:]
                 continue
 
             if stripped.startswith("received_at,"):
                 return "app", []
 
-            if legacy_columns is not None:
-                return "legacy", legacy_columns
+            if value_columns is not None:
+                return "csv", value_columns
 
             raise ValueError("未対応の CSV 形式です")
 
@@ -64,19 +64,19 @@ def load_log_csv(path: Path | str) -> LogData:
     log_format, columns = inspect_log_csv(path)
     if log_format == "app":
         return _load_app_log(path)
-    return _load_legacy_log(path, columns)
+    return _load_csv_log(path, columns)
 
 
-def _parse_legacy_header_line(line: str) -> list[str] | None:
+def _parse_header_line(line: str) -> list[str] | None:
     stripped = line.strip().lstrip("#").strip()
     if not stripped:
         return None
     return [column.strip() for column in stripped.split(",")]
 
 
-def _load_legacy_log(path: Path, value_columns: list[str]) -> LogData:
+def _load_csv_log(path: Path, value_columns: list[str]) -> LogData:
     if not value_columns:
-        raise ValueError("レガシー CSV に数値列がありません")
+        raise ValueError("CSV に数値列がありません")
 
     times: list[float] = []
     series: dict[str, list[float | None]] = {column: [] for column in value_columns}

@@ -12,7 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from log_format import format_log_line
 
-# time + 10 列（LogAnalyzer2 推奨形式）
 full_line = format_log_line(
     time_ms=315,
     values={
@@ -20,12 +19,14 @@ full_line = format_log_line(
         "speed": 10.0,
         "battery": 7971,
         "gyro": 44.0,
+        "roll": 2.5,
+        "yaw": -12.0,
+        "pitch": 1.25,
     },
 )
 print("完全行:")
 print(full_line, end="")
 
-# 列不足（不足分は LogAnalyzer2 側で null 扱い）
-partial_line = format_log_line(values={"gyro": 23.5})
+partial_line = format_log_line(values={"gyro": 23.5, "yaw": 10.0})
 print("列不足行:")
 print(partial_line, end="")
