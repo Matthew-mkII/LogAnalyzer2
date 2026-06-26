@@ -50,12 +50,10 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -65,7 +63,6 @@ from app_paths import logs_dir, temp_html_path
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
 from log_writer import LEGACY_VALUE_COLUMNS, LogWriter, LogWriterError, parse_legacy_row
-from tcp_manager import TcpLogManager
 
 
 def _qt_message_handler(mode, _context, message) -> None:
@@ -98,8 +95,6 @@ class MainWindow(QMainWindow):
         self._html_path = str(temp_html_path())
 
         self.bt_manager = BluetoothManager()
-        self.tcp_manager = TcpLogManager()
-        self._active_transport: str | None = None
         self._log_writer = LogWriter(str(logs_dir()))
 
         self.browser = QWebEngineView()
@@ -108,7 +103,6 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addLayout(self._create_bluetooth_panel())
-        layout.addLayout(self._create_tcp_panel())
         layout.addWidget(self._create_log_panel())
         layout.addWidget(self._create_series_panel())
         layout.addWidget(self.browser, stretch=1)
@@ -149,28 +143,6 @@ class MainWindow(QMainWindow):
 
         return panel
 
-    def _create_tcp_panel(self) -> QHBoxLayout:
-        panel = QHBoxLayout()
-
-        panel.addWidget(QLabel("TCP:"))
-
-        self.tcp_host_input = QLineEdit("127.0.0.1")
-        self.tcp_host_input.setMinimumWidth(120)
-        panel.addWidget(self.tcp_host_input)
-
-        panel.addWidget(QLabel("ポート"))
-
-        self.tcp_port_input = QSpinBox()
-        self.tcp_port_input.setRange(1, 65535)
-        self.tcp_port_input.setValue(8765)
-        panel.addWidget(self.tcp_port_input)
-
-        self.tcp_connect_btn = QPushButton("TCP接続")
-        self.tcp_connect_btn.clicked.connect(self._on_tcp_connect_clicked)
-        panel.addWidget(self.tcp_connect_btn)
-
-        return panel
-
     def _create_log_panel(self) -> QWidget:
         container = QWidget()
         layout = QHBoxLayout(container)
@@ -183,6 +155,10 @@ class MainWindow(QMainWindow):
         self.load_csv_btn = QPushButton("CSVからグラフ")
         self.load_csv_btn.clicked.connect(self._on_load_csv_clicked)
         layout.addWidget(self.load_csv_btn)
+
+        self.export_graph_btn = QPushButton("画像として保存")
+        self.export_graph_btn.clicked.connect(self._on_export_graph_clicked)
+        layout.addWidget(self.export_graph_btn)
 
         self.reset_view_btn = QPushButton("初期状態に戻す")
         self.reset_view_btn.clicked.connect(self._on_reset_view_clicked)
@@ -246,17 +222,11 @@ class MainWindow(QMainWindow):
     def _setup_bluetooth_signals(self) -> None:
         self.bt_manager.device_discovered.connect(self._on_device_discovered)
         self.bt_manager.scan_finished.connect(self._on_scan_finished)
-        self.bt_manager.connected.connect(self._on_transport_connected)
-        self.bt_manager.disconnected.connect(self._on_transport_disconnected)
+        self.bt_manager.connected.connect(self._on_connected)
+        self.bt_manager.disconnected.connect(self._on_disconnected)
         self.bt_manager.data_received.connect(self._on_data_received)
-        self.bt_manager.error_occurred.connect(self._on_transport_error)
+        self.bt_manager.error_occurred.connect(self._on_bt_error)
         self.bt_manager.status_changed.connect(self.status_label.setText)
-
-        self.tcp_manager.connected.connect(self._on_transport_connected)
-        self.tcp_manager.disconnected.connect(self._on_transport_disconnected)
-        self.tcp_manager.data_received.connect(self._on_data_received)
-        self.tcp_manager.error_occurred.connect(self._on_transport_error)
-        self.tcp_manager.status_changed.connect(self.status_label.setText)
 
     def _on_scan_clicked(self) -> None:
         if self.bt_manager.is_connected:
@@ -279,25 +249,17 @@ class MainWindow(QMainWindow):
         if not address:
             QMessageBox.warning(self, "接続", "デバイスを選択してください")
             return
-        self._set_transport_controls_enabled(False)
-        self._active_transport = "ble"
+        self.connect_btn.setEnabled(False)
+        self.scan_btn.setEnabled(False)
         asyncio.create_task(self.bt_manager.connect(address))
 
-    def _on_tcp_connect_clicked(self) -> None:
-        host = self.tcp_host_input.text().strip() or "127.0.0.1"
-        port = self.tcp_port_input.value()
-        self._set_transport_controls_enabled(False)
-        self._active_transport = "tcp"
-        asyncio.create_task(self.tcp_manager.connect(host, port))
-
     def _on_disconnect_clicked(self) -> None:
-        if self._active_transport == "tcp":
-            asyncio.create_task(self.tcp_manager.disconnect())
-        else:
-            asyncio.create_task(self.bt_manager.disconnect())
+        asyncio.create_task(self.bt_manager.disconnect())
 
-    def _on_transport_connected(self, _endpoint: str) -> None:
+    def _on_connected(self, _address: str) -> None:
+        self.connect_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
+        self.scan_btn.setEnabled(False)
 
         self._session_start = None
         self._x_data = []
@@ -320,16 +282,9 @@ class MainWindow(QMainWindow):
 
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
-    def _set_transport_controls_enabled(self, enabled: bool) -> None:
-        self.connect_btn.setEnabled(enabled)
-        self.tcp_connect_btn.setEnabled(enabled)
-        self.scan_btn.setEnabled(enabled)
-        self.tcp_host_input.setEnabled(enabled)
-        self.tcp_port_input.setEnabled(enabled)
-
-    def _on_transport_disconnected(self) -> None:
-        self._active_transport = None
-        self._set_transport_controls_enabled(True)
+    def _on_disconnected(self) -> None:
+        self.scan_btn.setEnabled(True)
+        self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
 
         if self._log_writer.is_active:
@@ -352,11 +307,10 @@ class MainWindow(QMainWindow):
                 pass
         self.log_path_label.setText("ログ: 記録エラー（書き込み停止）")
 
-    def _on_transport_error(self, message: str) -> None:
-        title = "TCP" if self._active_transport == "tcp" else "Bluetooth"
-        QMessageBox.warning(self, title, message)
-        self._active_transport = None
-        self._set_transport_controls_enabled(True)
+    def _on_bt_error(self, message: str) -> None:
+        QMessageBox.warning(self, "Bluetooth", message)
+        self.scan_btn.setEnabled(True)
+        self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
 
     def _on_load_csv_clicked(self) -> None:
@@ -394,6 +348,51 @@ class MainWindow(QMainWindow):
             return
         self._reset_graph_view()
 
+    def _on_export_graph_clicked(self) -> None:
+        active_series = {
+            name: values
+            for name, values in self._series_data.items()
+            if name in self._enabled_series
+        }
+        if not self._x_data or not active_series:
+            QMessageBox.information(self, "画像エクスポート", "エクスポートするデータがありません。")
+            return
+
+        default_name = datetime.now().strftime("graph_%Y%m%d_%H%M%S.png")
+        filters = (
+            "PNG 画像 (*.png);;"
+            "SVG 画像 (*.svg);;"
+            "JPEG 画像 (*.jpg);;"
+            "WebP 画像 (*.webp)"
+        )
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "グラフを画像として保存",
+            str(logs_dir() / default_name),
+            filters,
+        )
+        if not path:
+            return
+
+        extension_map = {
+            "PNG 画像 (*.png)": ".png",
+            "SVG 画像 (*.svg)": ".svg",
+            "JPEG 画像 (*.jpg)": ".jpg",
+            "WebP 画像 (*.webp)": ".webp",
+        }
+        suffix = extension_map.get(selected_filter, ".png")
+        if not path.lower().endswith(suffix):
+            path = f"{path}{suffix}"
+
+        try:
+            fig = self._build_figure(title=self._graph_title)
+            fig.write_image(path, width=1200, height=800, scale=2)
+        except Exception as exc:
+            QMessageBox.warning(self, "画像エクスポート", f"保存できません: {exc}")
+            return
+
+        QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
+
     def _reset_graph_view(self) -> None:
         self._graph_timer.stop()
         self._graph_dirty = False
@@ -402,16 +401,13 @@ class MainWindow(QMainWindow):
         self._enabled_series = set()
         self._graph_title = None
         self._sample_index = 0
-        if not self._is_transport_connected():
+        if not self.bt_manager.is_connected:
             self._session_start = None
         self._clear_series_panel()
         self._render_graph()
         self.log_path_label.setText(self._pre_csv_log_label)
         self._csv_view_active = False
         self.reset_view_btn.setEnabled(False)
-
-    def _is_transport_connected(self) -> bool:
-        return self.bt_manager.is_connected or self.tcp_manager.is_connected
 
     def _ensure_realtime_series(self) -> None:
         if self._series_data:
@@ -478,11 +474,7 @@ class MainWindow(QMainWindow):
         if title:
             fig.update_layout(title=title)
 
-    def _render_graph(self, title: str | None = None) -> None:
-        self._graph_dirty = False
-        if title is not None:
-            self._graph_title = title
-
+    def _build_figure(self, title: str | None = None) -> go.Figure:
         active_series = {
             name: values
             for name, values in self._series_data.items()
@@ -509,11 +501,20 @@ class MainWindow(QMainWindow):
 
             fig.update_xaxes(range=[0, x_max * 1.05], autorange=False)
             self._apply_graph_layout(fig, title=title or self._graph_title)
-        else:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=[0], y=[0], mode="lines", name="データなし"))
-            fig.update_xaxes(range=[0, 1], autorange=False)
-            self._apply_graph_layout(fig, title=title or self._graph_title or "データ待機中...")
+            return fig
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode="lines", name="データなし"))
+        fig.update_xaxes(range=[0, 1], autorange=False)
+        self._apply_graph_layout(fig, title=title or self._graph_title or "データ待機中...")
+        return fig
+
+    def _render_graph(self, title: str | None = None) -> None:
+        self._graph_dirty = False
+        if title is not None:
+            self._graph_title = title
+
+        fig = self._build_figure(title=title or self._graph_title)
 
         try:
             fig.write_html(self._html_path, include_plotlyjs=True)

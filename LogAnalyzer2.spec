@@ -23,6 +23,8 @@ a = Analysis(
         "plotly.graph_objects",
         "plotly.io",
         "plotly.validators",
+        "kaleido",
+        "choreographer",
         *pyside6_hiddenimports,
         *collect_submodules("bleak"),
     ],
