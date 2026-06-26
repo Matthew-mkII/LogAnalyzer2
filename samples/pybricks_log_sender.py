@@ -4,7 +4,7 @@
 対象: SPIKE Prime / Robot Inventor / Technic Hub 等（Pybricks firmware 3.3+）
 
 センサー:
-  - カラーセンサー（外付け）→ angleL=h, angleR=s, bright=v（HSV 生値）
+  - カラーセンサー（外付け）→ hue / saturation / value（HSV 生値）
   - IMU 姿勢角 → roll / yaw / pitch（角度 deg）
 
 配線:
@@ -47,7 +47,9 @@ VALUE_COLUMNS = (
     "battery",
     "angleL",
     "angleR",
-    "bright",
+    "hue",
+    "saturation",
+    "value",
     "Kp",
     "Ki",
     "Kd",
@@ -131,9 +133,11 @@ while True:
             "turn": 0.0,
             "speed": 0.0,
             "battery": read_battery(hub),
-            "angleL": hue,
-            "angleR": saturation,
-            "bright": value,
+            "angleL": 0.0,
+            "angleR": 0.0,
+            "hue": hue,
+            "saturation": saturation,
+            "value": value,
             "Kp": 0.0,
             "Ki": 0.0,
             "Kd": 0.0,

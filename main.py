@@ -198,7 +198,9 @@ class MainWindow(QMainWindow):
             return
 
         default_enabled = {
-            name for name in ("bright", "roll", "yaw", "pitch") if name in series_names
+            name
+            for name in ("hue", "saturation", "value", "roll", "yaw", "pitch")
+            if name in series_names
         }
         if not default_enabled and series_names:
             default_enabled = {series_names[0]}
