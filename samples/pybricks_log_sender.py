@@ -5,7 +5,6 @@
 
 センサー:
   - カラーセンサー（外付け）→ angleL=h, angleR=s, bright=v（HSV 生値）
-  - ジャイロセンサー（ラージハブ内蔵）→ gyro 列（角速度 deg/s）
   - IMU 姿勢角 → roll / yaw / pitch（角度 deg）
 
 配線:
@@ -14,7 +13,7 @@
   Pybricks では hub.imu 経由で読み取ります。
 
 使い方:
-  1. 下の COLOR_SENSOR_PORT / GYRO_AXIS を環境に合わせて変更
+  1. 下の COLOR_SENSOR_PORT を環境に合わせて変更
   2. Pybricks Code で本ファイルをハブに書き込む
   3. Pybricks Code から切断する（他アプリと同時接続不可）
   4. LogAnalyzer2 でスキャン → ハブ名を選択 → 接続
@@ -31,7 +30,7 @@
 """
 
 from pybricks.hubs import ThisHub
-from pybricks.parameters import Axis, Port
+from pybricks.parameters import Port
 from pybricks.pupdevices import ColorSensor
 from pybricks.tools import StopWatch, wait
 
@@ -39,7 +38,6 @@ from usys import stdout
 
 # --- センサー設定（お使いのロボットに合わせて変更） ---
 COLOR_SENSOR_PORT = Port.E
-GYRO_AXIS = Axis.Z  # ヨー角速度。ピッチ=Axis.X、ロール=Axis.Y
 
 SEND_INTERVAL_MS = 100
 
@@ -50,7 +48,6 @@ VALUE_COLUMNS = (
     "angleL",
     "angleR",
     "bright",
-    "gyro",
     "Kp",
     "Ki",
     "Kd",
@@ -96,14 +93,6 @@ def read_hsv(color_sensor):
         return None
 
 
-def read_gyro(hub):
-    """ラージハブ内蔵ジャイロセンサーの角速度（deg/s）を読む。"""
-    try:
-        return hub.imu.angular_velocity(GYRO_AXIS)
-    except AttributeError:
-        return None
-
-
 def read_orientation(hub):
     """ラージハブ内蔵 IMU の姿勢角 roll / yaw / pitch（deg）を読む。"""
     try:
@@ -145,7 +134,6 @@ while True:
             "angleL": hue,
             "angleR": saturation,
             "bright": value,
-            "gyro": read_gyro(hub),
             "Kp": 0.0,
             "Ki": 0.0,
             "Kd": 0.0,

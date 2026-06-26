@@ -79,7 +79,6 @@ class PcBleLogSender:
         while True:
             if self._sending and await self._server.is_connected():
                 elapsed_ms = (time.monotonic() - self._start_monotonic) * 1000
-                gyro = 40.0 + 5.0 * math.sin(self._sample_index / 10.0)
                 t = self._sample_index / 10.0
                 roll = 10.0 * math.sin(t)
                 yaw = 20.0 + 5.0 * math.cos(t)
@@ -90,7 +89,6 @@ class PcBleLogSender:
                         "turn": -45.0,
                         "speed": 10.0,
                         "battery": 8000.0 - self._sample_index,
-                        "gyro": gyro,
                         "roll": roll,
                         "yaw": yaw,
                         "pitch": pitch,

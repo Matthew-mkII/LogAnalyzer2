@@ -9,7 +9,6 @@ VALUE_COLUMNS = (
     "angleL",
     "angleR",
     "bright",
-    "gyro",
     "Kp",
     "Ki",
     "Kd",
@@ -32,8 +31,8 @@ def format_log_line(
 ) -> str:
     """1 レコード分のログ行を生成する（末尾に改行付き）。
 
-    time_ms を指定すると「time + 13 データ列」の 14 列形式になる。
-    省略すると「13 データ列」のみ（LogAnalyzer2 側で受信時刻から time を補完）。
+    time_ms を指定すると「time + 12 データ列」の 13 列形式になる。
+    省略すると「12 データ列」のみ（LogAnalyzer2 側で受信時刻から time を補完）。
     """
     row_values = values or {}
     fields: list[str] = []

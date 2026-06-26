@@ -18,7 +18,6 @@ full_line = format_log_line(
         "turn": -45.0,
         "speed": 10.0,
         "battery": 7971,
-        "gyro": 44.0,
         "roll": 2.5,
         "yaw": -12.0,
         "pitch": 1.25,
@@ -27,6 +26,6 @@ full_line = format_log_line(
 print("完全行:")
 print(full_line, end="")
 
-partial_line = format_log_line(values={"gyro": 23.5, "yaw": 10.0})
+partial_line = format_log_line(values={"yaw": 23.5, "pitch": 1.0})
 print("列不足行:")
 print(partial_line, end="")

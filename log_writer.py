@@ -10,7 +10,6 @@ VALUE_COLUMNS = (
     "angleL",
     "angleR",
     "bright",
-    "gyro",
     "Kp",
     "Ki",
     "Kd",
