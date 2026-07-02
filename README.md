@@ -455,6 +455,70 @@ while True:
 
 - BOOST Move Hub は `usys` 非対応のため動作しません
 - センサー値は環境に合わせてサンプル内の読み取り部を書き換えてください
+- **Pybricks 公式ファームウェア**では Python のみ実行可能です。**C/C++ でハブ上で動かす**場合は [SPIKE-RT](https://github.com/spike-rt/spike-rt) へのファームウェア差し替えが必要です（下記参照）
+
+### 実装例（Pybricks：ライントレース + ログ）
+
+On/Off 制御でライントレースしながらセンサー値を送信する例です。  
+サンプル: [`samples/pybricks_line_tracer_log_sender.py`](samples/pybricks_line_tracer_log_sender.py)
+
+`LineTracerOnOff` と同じ配線・制御ロジックに、LogAnalyzer2 形式の CSV 出力を組み合わせています。
+
+| 項目 | 内容 |
+|------|------|
+| モーター | Port A: 右 / Port B: 左 |
+| ボタン | Port D: フォースセンサー（1 回目で閾値測定、2 回目で走行開始） |
+| カラーセンサー | Port E: ライン検出 + HSV ログ |
+| 走行 | `speed=100`, `turn=±55`, 最大約 60 秒 |
+| ログ列 | `turn`, `speed`, `battery`, `angleL`, `angleR`, `hue`, `saturation`, `value`, `Kp`, `Ki`, `Kd`, `roll`, `yaw`, `pitch` |
+
+手順:
+
+1. ファイル先頭の `edge`（`LEFT_EDGE` / `RIGHT_EDGE`）とポートを確認
+2. Pybricks Code でハブに書き込み、**切断する**
+3. LogAnalyzer2 で **スキャン** → ハブ名を選択 → **接続**
+4. ハブでプログラムを開始し、フォースセンサーで閾値測定 → 走行開始
+
+### 実装例（SPIKE-RT + C++：ライントレース + ログ）
+
+[SPIKE-RT](https://github.com/spike-rt/spike-rt) ファームウェアを SPIKE Prime ハブに書き込み、C++ でライントレースしながら LogAnalyzer2 形式の CSV を Bluetooth（NUS）で送信する例です。  
+サンプル: [`samples/spike_rt_line_tracer_log_sender/`](samples/spike_rt_line_tracer_log_sender/)
+
+Pybricks 版（`pybricks_line_tracer_log_sender.py`）と同じ配線・On/Off 制御・CSV 列です。BLE は SPIKE-RT の Pybricks 互換シリアル（Nordic UART Service）経由で、LogAnalyzer2 の NUS 受信に対応します。
+
+| 項目 | 内容 |
+|------|------|
+| 対象ハブ | SPIKE Prime（SPIKE-RT 書き込み済み） |
+| モーター | Port A: 右 / Port B: 左 |
+| ボタン | Port D: フォースセンサー |
+| カラーセンサー | Port E |
+| ソース | `line_tracer_log_sender.cpp` |
+
+#### 環境構築（概要）
+
+1. [spike-rt](https://github.com/spike-rt/spike-rt) と [spike-rt-sample](https://github.com/Hiyama1026/spike-rt-sample) をクローンし、SPIKE-RT のビルド手順に従って開発環境を用意（Linux / WSL / Docker 推奨）
+2. サンプルを spike-rt-sample に配置:
+
+```bash
+./samples/spike_rt_line_tracer_log_sender/install_to_spike_rt_sample.sh /path/to/spike-rt-sample
+```
+
+3. ビルドと書き込み（ハブを DFU モードにして USB 接続）:
+
+```bash
+cd /path/to/spike-rt-sample/API-sample/line_tracer_log_sender
+make
+make deploy-lin    # Linux / WSL
+```
+
+4. ハブの電源を入れると `READY` 表示で BLE 待機 → LogAnalyzer2 で **スキャン** → ハブを選択 → **接続**
+5. フォースセンサー 1 回目: 閾値測定 / 2 回目: 走行開始
+
+注意:
+
+- SPIKE-RT は LEGO 公式ファームウェアを置き換えます。元に戻すには公式ファームウェアの再書き込みが必要です
+- `kEdge`（`kLeftEdge` / `kRightEdge`）は `line_tracer_log_sender.cpp` 先頭で切り替え
+- IMU の `yaw` は角速度積分、`roll` / `pitch` は加速度から算出（Pybricks の `tilt()` / `heading()` とは算出方法が異なる場合があります）
 
 ### 実装例（PC + bless、テスト用）
 
