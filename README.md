@@ -218,8 +218,6 @@ Bluetooth 接続中に自動保存される CSV は、従来の `angleL` / `angl
 | 1 行目 | `# time, turn, speed, battery, angleL, angleR, hue, saturation, value, Kp, Ki, Kd, roll, yaw, pitch` — データ列名 |
 | 2 行目以降 | データ行（ヘッダー行はありません） |
 
-LogAnalyzer 2015 等が出力した既存ログ（`gyro` 列を含む 10 データ列）も **CSVからグラフ** で読み込めます（ヘッダー行の列名に従って解釈）。本アプリが新規保存する CSV には `gyro` 列は含まれません。
-
 ##### データ列
 
 | 列名 | 内容 |
