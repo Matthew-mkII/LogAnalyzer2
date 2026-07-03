@@ -86,7 +86,6 @@ pyinstaller --distpath dist\LogAnalyzer2 --noconfirm LogAnalyzer2.spec
 2. プロジェクトフォルダで `build_macos.sh` を実行します。
 
 ```bash
-cd /path/to/LogAnalyzer2
 ./build_macos.sh
 ```
 
