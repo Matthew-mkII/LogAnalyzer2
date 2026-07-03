@@ -40,11 +40,12 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(_chromium_flags)
 os.environ["QT_API"] = "pyside6"
 
 import asyncio
+import time
 from datetime import datetime
 
 import plotly.graph_objects as go
 import qasync
-from PySide6.QtCore import Qt, QtMsgType, QUrl, qInstallMessageHandler
+from PySide6.QtCore import Qt, QtMsgType, QTimer, QUrl, qInstallMessageHandler
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -61,7 +62,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from app_paths import app_base_dir, logs_dir, temp_html_path
+from app_paths import app_base_dir, logs_dir
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
 from log_writer import VALUE_COLUMNS, LogWriter, LogWriterError, is_complete_log_row, parse_log_row
@@ -94,8 +95,11 @@ class MainWindow(QMainWindow):
         self._graph_io_error_shown = False
         self._csv_view_active = False
         self._pre_csv_log_label = "ログ: 未記録"
-        self._html_path = str(temp_html_path())
-        self._graph_update_handle: asyncio.Handle | None = None
+        self._graph_html_seq = 0
+        self._last_graph_html_path: str | None = None
+        self._graph_timer = QTimer(self)
+        self._graph_timer.setSingleShot(True)
+        self._graph_timer.timeout.connect(self._render_graph_scheduled)
 
         self.bt_manager = BluetoothManager()
         self._log_writer = LogWriter(str(logs_dir()))
@@ -290,9 +294,7 @@ class MainWindow(QMainWindow):
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _cancel_scheduled_graph_update(self) -> None:
-        if self._graph_update_handle is not None:
-            self._graph_update_handle.cancel()
-            self._graph_update_handle = None
+        self._graph_timer.stop()
 
     def _on_disconnected(self) -> None:
         self._cancel_scheduled_graph_update()
@@ -489,14 +491,11 @@ class MainWindow(QMainWindow):
                     return
 
     def _schedule_graph_update(self) -> None:
-        if self._graph_update_handle is not None:
+        if self._graph_timer.isActive():
             return
-
-        loop = asyncio.get_event_loop()
-        self._graph_update_handle = loop.call_later(0.2, self._render_graph_scheduled)
+        self._graph_timer.start(200)
 
     def _render_graph_scheduled(self) -> None:
-        self._graph_update_handle = None
         self._render_graph()
 
     def _normalize_x_axis(self, x_data: list[float]) -> list[float]:
@@ -565,6 +564,11 @@ class MainWindow(QMainWindow):
         self._apply_graph_layout(fig, title=title or self._graph_title or "データ待機中...")
         return fig
 
+    def _next_graph_html_path(self) -> str:
+        # WebEngine が読み込み中の HTML をロックするため、毎回別ファイルに書き出す。
+        self._graph_html_seq += 1
+        return str(app_base_dir() / f"temp_graph_{self._graph_html_seq}.html")
+
     def _render_graph(self, title: str | None = None) -> None:
         self._cancel_scheduled_graph_update()
         if title is not None:
@@ -573,13 +577,25 @@ class MainWindow(QMainWindow):
         fig = self._build_figure(title=title or self._graph_title)
 
         try:
-            html = fig.to_html(include_plotlyjs=True, config={"displayModeBar": False})
-            base_url = QUrl.fromLocalFile(str(app_base_dir()) + os.sep)
-            self.browser.setHtml(html, base_url)
+            html_path = self._next_graph_html_path()
+            # Windows の Qt WebEngine は include_plotlyjs=True（約 5MB）の再読み込みに失敗する。
+            # plotly.min.js を同フォルダに1回だけ置き、HTML は約 8KB に抑える。
+            fig.write_html(
+                html_path,
+                include_plotlyjs="directory",
+                config={"displayModeBar": False},
+            )
 
-            tmp_path = f"{self._html_path}.tmp"
-            fig.write_html(tmp_path, include_plotlyjs=True)
-            os.replace(tmp_path, self._html_path)
+            url = QUrl.fromLocalFile(html_path)
+            url.setQuery(str(time.time()))
+            self.browser.load(url)
+
+            if self._last_graph_html_path:
+                try:
+                    os.remove(self._last_graph_html_path)
+                except OSError:
+                    pass
+            self._last_graph_html_path = html_path
 
             self._graph_io_error_shown = False
         except OSError as exc:
