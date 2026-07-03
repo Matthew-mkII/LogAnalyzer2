@@ -26,15 +26,17 @@ class _FilteredStderr:
 
 sys.stderr = _FilteredStderr(sys.stderr)
 
-# ★ 完全安定設定
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-    "--disable-gpu --disable-software-rasterizer --disable-gpu-compositing "
-    "--disable-logging --log-level=3"
-)
-os.environ["QT_OPENGL"] = "software"
-os.environ["QT_XCB_GL_INTEGRATION"] = "none"
-os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
-os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+# Qt WebEngine — OS ごとにチューニング（Windows で全ラスタライザ無効化すると描画が止まる）
+_chromium_flags = ["--disable-logging", "--log-level=3"]
+if sys.platform == "darwin":
+    os.environ["QT_OPENGL"] = "software"
+    os.environ["QT_XCB_GL_INTEGRATION"] = "none"
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    _chromium_flags.extend(["--disable-gpu", "--disable-gpu-compositing"])
+elif sys.platform == "win32":
+    os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(_chromium_flags)
 os.environ["QT_API"] = "pyside6"
 
 import asyncio
@@ -42,7 +44,7 @@ from datetime import datetime
 
 import plotly.graph_objects as go
 import qasync
-from PySide6.QtCore import QTimer, QUrl, QtMsgType, qInstallMessageHandler
+from PySide6.QtCore import Qt, QtMsgType, QUrl, qInstallMessageHandler
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -59,7 +61,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from app_paths import logs_dir, temp_html_path
+from app_paths import app_base_dir, logs_dir, temp_html_path
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
 from log_writer import VALUE_COLUMNS, LogWriter, LogWriterError, is_complete_log_row, parse_log_row
@@ -93,6 +95,7 @@ class MainWindow(QMainWindow):
         self._csv_view_active = False
         self._pre_csv_log_label = "ログ: 未記録"
         self._html_path = str(temp_html_path())
+        self._graph_update_handle: asyncio.Handle | None = None
 
         self.bt_manager = BluetoothManager()
         self._log_writer = LogWriter(str(logs_dir()))
@@ -110,11 +113,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self._setup_bluetooth_signals()
-
-        self._graph_timer = QTimer()
-        self._graph_timer.setSingleShot(True)
-        self._graph_timer.timeout.connect(self._render_graph)
-        self._graph_dirty = False
 
     def _create_bluetooth_panel(self) -> QHBoxLayout:
         panel = QHBoxLayout()
@@ -230,7 +228,10 @@ class MainWindow(QMainWindow):
         self.bt_manager.scan_finished.connect(self._on_scan_finished)
         self.bt_manager.connected.connect(self._on_connected)
         self.bt_manager.disconnected.connect(self._on_disconnected)
-        self.bt_manager.data_received.connect(self._on_data_received)
+        self.bt_manager.data_received.connect(
+            self._on_data_received,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.bt_manager.error_occurred.connect(self._on_bt_error)
         self.bt_manager.status_changed.connect(self.status_label.setText)
 
@@ -288,9 +289,13 @@ class MainWindow(QMainWindow):
 
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
+    def _cancel_scheduled_graph_update(self) -> None:
+        if self._graph_update_handle is not None:
+            self._graph_update_handle.cancel()
+            self._graph_update_handle = None
+
     def _on_disconnected(self) -> None:
-        self._graph_timer.stop()
-        self._graph_dirty = False
+        self._cancel_scheduled_graph_update()
 
         self.scan_btn.setEnabled(True)
         self.connect_btn.setEnabled(True)
@@ -404,8 +409,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
 
     def _reset_graph_view(self) -> None:
-        self._graph_timer.stop()
-        self._graph_dirty = False
+        self._cancel_scheduled_graph_update()
         self._x_data = []
         self._series_data = {}
         self._enabled_series = set()
@@ -485,9 +489,15 @@ class MainWindow(QMainWindow):
                     return
 
     def _schedule_graph_update(self) -> None:
-        if not self._graph_dirty:
-            self._graph_dirty = True
-            self._graph_timer.start(200)
+        if self._graph_update_handle is not None:
+            return
+
+        loop = asyncio.get_event_loop()
+        self._graph_update_handle = loop.call_later(0.2, self._render_graph_scheduled)
+
+    def _render_graph_scheduled(self) -> None:
+        self._graph_update_handle = None
+        self._render_graph()
 
     def _normalize_x_axis(self, x_data: list[float]) -> list[float]:
         if not x_data:
@@ -556,15 +566,21 @@ class MainWindow(QMainWindow):
         return fig
 
     def _render_graph(self, title: str | None = None) -> None:
-        self._graph_dirty = False
+        self._cancel_scheduled_graph_update()
         if title is not None:
             self._graph_title = title
 
         fig = self._build_figure(title=title or self._graph_title)
 
         try:
-            fig.write_html(self._html_path, include_plotlyjs=True)
-            self.browser.load(QUrl.fromLocalFile(self._html_path))
+            html = fig.to_html(include_plotlyjs=True, config={"displayModeBar": False})
+            base_url = QUrl.fromLocalFile(str(app_base_dir()) + os.sep)
+            self.browser.setHtml(html, base_url)
+
+            tmp_path = f"{self._html_path}.tmp"
+            fig.write_html(tmp_path, include_plotlyjs=True)
+            os.replace(tmp_path, self._html_path)
+
             self._graph_io_error_shown = False
         except OSError as exc:
             if not self._graph_io_error_shown:
