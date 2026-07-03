@@ -808,16 +808,22 @@ class MainWindow(QMainWindow):
         return [x - x_min for x in x_data]
 
     def _apply_graph_layout(self, fig: go.Figure, title: str | None = None) -> None:
+        trace_count = len(fig.data)
+        legend_rows = max(1, (trace_count + 4) // 5)
+        legend_space = 28 * legend_rows
+        title_space = 28 if title else 0
+        top_margin = legend_space + title_space + 12
+
         fig.update_layout(
             showlegend=True,
-            margin=dict(l=60, r=20, t=28 if title else 8, b=50),
+            margin=dict(l=60, r=20, t=top_margin, b=50),
             legend=dict(
                 orientation="h",
-                yanchor="top",
-                y=0.98,
+                yanchor="bottom",
+                y=1.02,
                 xanchor="left",
                 x=0,
-                bgcolor="rgba(255,255,255,0.75)",
+                bgcolor="rgba(255,255,255,0.9)",
             ),
             xaxis_title="経過時間 (ms)",
             yaxis_title="値",
