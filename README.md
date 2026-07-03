@@ -382,8 +382,7 @@ LogAnalyzer2 にデータを送るデバイス側は、BLE ペリフェラルと
 
 ### 実装例（Pybricks）
 
-LEGO SPIKE Prime / Robot Inventor / Technic Hub 等で Pybricks を使う場合の例です。  
-サンプル: [`samples/pybricks_log_sender.py`](samples/pybricks_log_sender.py)
+LEGO SPIKE Prime / Robot Inventor / Technic Hub 等で Pybricks を使う場合の例です。
 
 Pybricks は **NUS ではなく `usys.stdout` 経由** で PC にデータを送ります。LogAnalyzer2 は Pybricks の stdout イベント（GATT `c5f50002-...`）と NUS の両方を受信できます。
 
@@ -428,7 +427,7 @@ while True:
 
 手順:
 
-1. Pybricks Code で `pybricks_line_tracer_log_sender.py` をハブに書き込む
+1. Pybricks Code で上記コードをハブに書き込む
 2. **Pybricks Code から切断する**（他アプリと同時接続不可）
 3. LogAnalyzer2 で **スキャン** → ハブ名を選択 → **接続**
 4. ハブのボタンでプログラムを開始
@@ -601,28 +600,43 @@ Pybricks ハブでは NUS ではなく stdout イベントで送ります。ESP3
 
 ```
 LogAnalyzer2/
-├── main.py                  # メインウィンドウ・グラフ表示
-├── app_paths.py             # 開発時・exe 化後のパス解決
-├── bluetooth_manager.py     # BLE スキャン・接続・データ受信
-├── log_writer.py            # 受信ログの CSV 出力
-├── log_reader.py            # 保存済み CSV ログの読み込み
-├── LogAnalyzer2.spec        # PyInstaller 設定
-├── build_windows.bat        # Windows 向け exe ビルドスクリプト
-├── requirements-build.txt   # ビルド用依存
+├── main.py                      # メインウィンドウ・グラフ表示
+├── app_paths.py                 # 開発時・exe 化後のパス解決
+├── bluetooth_manager.py         # BLE スキャン・接続・データ受信（NUS / Pybricks stdout）
+├── log_writer.py                # 受信ログの CSV 出力
+├── log_reader.py                # 保存済み CSV ログの読み込み
+├── LogAnalyzer2.spec            # PyInstaller 設定
+├── build_windows.bat            # Windows 向け exe ビルドスクリプト
+├── requirements.txt             # 実行時依存パッケージ
+├── requirements-build.txt       # ビルド用依存（PyInstaller 等）
 ├── runtime_hook_qtwebengine.py  # Qt WebEngine ランタイムフック
-├── requirements.txt         # 依存パッケージ
-├── LICENSE                  # 本ソフトウェアの利用許諾
-├── THIRD_PARTY_NOTICES.txt  # 第三者ライブラリのライセンス表示
-├── licenses/                # 第三者ライセンス全文
-│   ├── LGPL-3.0.txt         # PySide6 / Qt 用
+├── LICENSE                      # 本ソフトウェアの利用許諾
+├── THIRD_PARTY_NOTICES.txt      # 第三者ライブラリのライセンス表示
+├── README.md                    # 本ドキュメント
+├── .gitignore
+├── licenses/                    # 第三者ライセンス全文
+│   ├── LGPL-3.0.txt             # PySide6 / Qt 用
 │   └── MIT.txt
-├── logs/                    # 受信ログの保存先（自動生成）
-├── samples/                 # ログ送信サンプル（Pybricks / PC BLE 等）
-│   ├── pybricks_log_sender.py
-│   ├── pc_ble_log_sender.py
-│   └── log_format.py
-└── temp.html                # グラフ描画用の一時 HTML（自動生成）
+├── logs/                        # 受信ログの保存先（実行時に自動生成、*.csv は .gitignore）
+├── samples/                     # ログ送信サンプル
+│   ├── pybricks_line_tracer_log_sender.py  # Pybricks: ライントレース + ログ
+│   ├── pc_ble_log_sender.py                # PC BLE テスト用（bless）
+│   ├── log_format.py                       # CSV 行フォーマット共通モジュール
+│   ├── format_demo.py                      # log_format の動作確認用
+│   ├── requirements-sender.txt             # pc_ble_log_sender 用依存
+│   └── spike_rt_line_tracer_log_sender/    # SPIKE-RT (C++): ライントレース + ログ
+│       ├── line_tracer_log_sender.cpp
+│       ├── line_tracer_log_sender.h
+│       ├── line_tracer_log_sender.cfg
+│       ├── line_tracer_log_sender.cdl
+│       ├── Makefile
+│       └── install_to_spike_rt_sample.sh
+├── temp.html                    # グラフ描画用の一時 HTML（実行時に自動生成、.gitignore）
+├── build/                       # PyInstaller 中間出力（ビルド時のみ、.gitignore）
+└── dist/                        # PyInstaller 成果物（ビルド時のみ、.gitignore）
 ```
+
+ビルドや実行で生成される `logs/`・`temp.html`・`build/`・`dist/` は `.gitignore` 対象です。ローカル開発用の仮想環境（`la2/` 等）も同様に Git 管理外です。
 
 ## ライセンス
 

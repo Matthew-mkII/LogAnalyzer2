@@ -2,7 +2,7 @@
 """LogAnalyzer2 向け BLE ログ送信サンプル（PC + bless）
 
 Pybricks ハブではなく、PC が仮想デバイス LogSensor として送信するテスト用です。
-Pybricks ハブから送る場合は pybricks_log_sender.py を使用してください。
+Pybricks ハブから送る場合は `samples/pybricks_line_tracer_log_sender.py` 等を参照してください。
 
 使い方:
     pip install -r samples/requirements-sender.txt
