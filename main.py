@@ -41,6 +41,8 @@ os.environ["QT_API"] = "pyside6"
 import asyncio
 import base64
 import json
+import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -104,13 +106,15 @@ class MainWindow(QMainWindow):
         self._pending_figure_for_fallback: go.Figure | None = None
         self._pending_export_path: str | None = None
         self._pending_export_format = "png"
+        self._graph_html_seq = 0
+        self._last_graph_html_path: str | None = None
 
         self.bt_manager = BluetoothManager()
         self._log_writer = LogWriter(str(logs_dir()))
 
         self._graph_timer = QTimer(self)
         self._graph_timer.setSingleShot(True)
-        self._graph_timer.timeout.connect(self._render_graph)
+        self._graph_timer.timeout.connect(self._render_graph_scheduled)
 
         self.browser = QWebEngineView()
         self.browser.setMinimumHeight(360)
@@ -554,13 +558,41 @@ class MainWindow(QMainWindow):
         self._plotly_page_loading = False
         self._pending_figure = None
         self._pending_figure_for_fallback = None
+        if self._last_graph_html_path:
+            try:
+                os.remove(self._last_graph_html_path)
+            except OSError:
+                pass
+        self._last_graph_html_path = None
 
     def _cancel_scheduled_graph_update(self) -> None:
         self._graph_timer.stop()
 
     def _schedule_graph_update(self) -> None:
-        if not self._graph_timer.isActive():
-            self._graph_timer.start(200)
+        if self._graph_timer.isActive():
+            return
+        self._graph_timer.start(200)
+
+    def _render_graph_scheduled(self) -> None:
+        self._render_graph()
+
+    def _ensure_plotly_js(self) -> None:
+        target = app_base_dir() / "plotly.min.js"
+        if target.is_file():
+            return
+
+        source = Path(__file__).resolve().parent / "plotly.min.js"
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            bundled = Path(sys._MEIPASS) / "plotly.min.js"
+            if bundled.is_file():
+                source = bundled
+
+        if source.is_file():
+            shutil.copy2(source, target)
+
+    def _next_graph_html_path(self) -> str:
+        self._graph_html_seq += 1
+        return str(app_base_dir() / f"temp_graph_{self._graph_html_seq}.html")
 
     def _display_graph_figure(self, fig: go.Figure) -> None:
         if self._plotly_page_ready:
@@ -576,10 +608,6 @@ class MainWindow(QMainWindow):
     def _load_plotly_page(self, fig: go.Figure) -> None:
         self._plotly_page_loading = True
         self._plotly_page_ready = False
-
-        tmp_path = f"{self._html_path}.tmp"
-        fig.write_html(tmp_path, include_plotlyjs=True, config={"displayModeBar": False})
-        os.replace(tmp_path, self._html_path)
 
         def on_loaded(success: bool) -> None:
             try:
@@ -597,15 +625,32 @@ class MainWindow(QMainWindow):
         self.browser.loadFinished.connect(on_loaded)
 
         if sys.platform == "darwin":
+            tmp_path = f"{self._html_path}.tmp"
+            fig.write_html(tmp_path, include_plotlyjs=True, config={"displayModeBar": False})
+            os.replace(tmp_path, self._html_path)
             url = QUrl.fromLocalFile(os.path.abspath(self._html_path))
             url.setQuery(f"v={self._graph_revision}")
             self._graph_revision += 1
             self.browser.load(url)
             return
 
-        html = fig.to_html(include_plotlyjs=True, config={"displayModeBar": False})
-        base_url = QUrl.fromLocalFile(str(app_base_dir()) + os.sep)
-        self.browser.setHtml(html, base_url)
+        self._ensure_plotly_js()
+        html_path = self._next_graph_html_path()
+        fig.write_html(
+            html_path,
+            include_plotlyjs="directory",
+            config={"displayModeBar": False},
+        )
+        url = QUrl.fromLocalFile(html_path)
+        url.setQuery(str(time.time()))
+        self.browser.load(url)
+
+        if self._last_graph_html_path:
+            try:
+                os.remove(self._last_graph_html_path)
+            except OSError:
+                pass
+        self._last_graph_html_path = html_path
 
     def _react_plotly_figure(self, fig: go.Figure) -> None:
         figure = json.loads(fig.to_json())

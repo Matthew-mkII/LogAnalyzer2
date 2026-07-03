@@ -26,7 +26,7 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=pyside6_binaries,
-    datas=pyside6_datas,
+    datas=pyside6_datas + [(os.path.join(spec_dir, "plotly.min.js"), ".")],
     hiddenimports=[
         "qasync",
         "plotly",
