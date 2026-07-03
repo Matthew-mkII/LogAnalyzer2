@@ -40,6 +40,7 @@ os.environ["QT_API"] = "pyside6"
 
 import asyncio
 import base64
+import concurrent.futures
 import json
 import shutil
 import time
@@ -48,7 +49,7 @@ from pathlib import Path
 
 import plotly.graph_objects as go
 import qasync
-from PySide6.QtCore import Qt, QTimer, QtMsgType, QUrl, qInstallMessageHandler
+from PySide6.QtCore import QLockFile, Qt, QStandardPaths, QTimer, QtMsgType, QUrl, qInstallMessageHandler
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -106,6 +107,7 @@ class MainWindow(QMainWindow):
         self._pending_figure_for_fallback: go.Figure | None = None
         self._pending_export_path: str | None = None
         self._pending_export_format = "png"
+        self._pending_export_figure: go.Figure | None = None
         self._graph_html_seq = 0
         self._last_graph_html_path: str | None = None
 
@@ -389,7 +391,6 @@ class MainWindow(QMainWindow):
         default_name = datetime.now().strftime("graph_%Y%m%d_%H%M%S.png")
         filters = (
             "PNG 画像 (*.png);;"
-            "SVG 画像 (*.svg);;"
             "JPEG 画像 (*.jpg);;"
             "WebP 画像 (*.webp)"
         )
@@ -404,13 +405,11 @@ class MainWindow(QMainWindow):
 
         extension_map = {
             "PNG 画像 (*.png)": ".png",
-            "SVG 画像 (*.svg)": ".svg",
             "JPEG 画像 (*.jpg)": ".jpg",
             "WebP 画像 (*.webp)": ".webp",
         }
         format_map = {
             ".png": "png",
-            ".svg": "svg",
             ".jpg": "jpeg",
             ".jpeg": "jpeg",
             ".webp": "webp",
@@ -420,22 +419,72 @@ class MainWindow(QMainWindow):
         if not suffix:
             suffix = extension_map.get(selected_filter, ".png")
             path = f"{path}{suffix}"
+        elif suffix not in format_map:
+            suffix = ".png"
+            path = f"{path}.png"
 
         export_format = format_map.get(suffix, "png")
+        fig = self._build_figure(title=self._graph_title)
+
+        if self._try_export_figure_to_file(fig, path, export_format):
+            QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
+            return
+
+        self._pending_export_figure = fig
         self._pending_export_path = path
         self._pending_export_format = export_format
         self._export_image_from_browser()
 
+    def _try_export_figure_to_file(
+        self, fig: go.Figure, path: str, export_format: str
+    ) -> bool:
+        # PyInstaller 版 macOS では kaleido が子プロセス経由で .app を再起動するため使わない
+        if getattr(sys, "frozen", False):
+            return False
+
+        kwargs: dict[str, object] = {"width": 1200, "height": 800}
+        kwargs["scale"] = 2
+
+        def write_image() -> None:
+            fig.write_image(path, format=export_format, **kwargs)
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(write_image).result(timeout=90)
+        except Exception:
+            return False
+        return True
+
     def _export_image_from_browser(self) -> None:
+        fig = self._pending_export_figure
+        if fig is None:
+            fig = self._build_figure(title=self._graph_title)
         export_format = self._pending_export_format
+        figure = json.loads(fig.to_json())
+        payload = json.dumps({"data": figure["data"], "layout": figure["layout"]})
         js = f"""
         (async function() {{
-            var gd = document.querySelector('.plotly-graph-div');
-            if (!gd || !window.Plotly) {{
+            if (!window.Plotly) {{
                 return '';
             }}
+
+            var figure = {payload};
+            var host = document.getElementById('la2-export-host');
+            if (!host) {{
+                host = document.createElement('div');
+                host.id = 'la2-export-host';
+                host.style.position = 'fixed';
+                host.style.left = '-20000px';
+                host.style.top = '0';
+                host.style.width = '1200px';
+                host.style.height = '800px';
+                document.body.appendChild(host);
+            }}
+
+            var layout = Object.assign({{width: 1200, height: 800}}, figure.layout || {{}});
             try {{
-                return await Plotly.toImage(gd, {{
+                await Plotly.newPlot(host, figure.data, layout, {{displayModeBar: false}});
+                return await Plotly.toImage(host, {{
                     format: '{export_format}',
                     width: 1200,
                     height: 800,
@@ -448,28 +497,63 @@ class MainWindow(QMainWindow):
         """
         self.browser.page().runJavaScript(js, self._on_browser_image_ready)
 
+    def _grab_browser_pixmap(self):
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            window_id = self.browser.winId()
+            if window_id:
+                pixmap = screen.grabWindow(int(window_id))
+                if not pixmap.isNull():
+                    return pixmap
+        return self.browser.grab()
+
+    def _save_pixmap_to_path(self, pixmap, path: str, export_format: str) -> bool:
+        if pixmap.isNull():
+            return False
+
+        format_map = {
+            "png": ("PNG", None),
+            "jpeg": ("JPEG", 92),
+            "webp": ("WEBP", 92),
+        }
+        qt_format, quality = format_map.get(export_format, ("PNG", None))
+        if quality is None:
+            return pixmap.save(path, qt_format)
+        return pixmap.save(path, qt_format, quality)
+
+    def _save_data_url_to_path(self, data_url: str, path: str) -> None:
+        _, encoded = data_url.split(",", 1)
+        image_bytes = base64.b64decode(encoded)
+        with open(path, "wb") as image_file:
+            image_file.write(image_bytes)
+
     def _on_browser_image_ready(self, data_url: object) -> None:
         path = self._pending_export_path
+        export_format = self._pending_export_format
         self._pending_export_path = None
+        self._pending_export_figure = None
 
-        if not path or not isinstance(data_url, str) or not data_url.startswith("data:"):
-            QMessageBox.warning(
-                self,
-                "画像エクスポート",
-                "画像を生成できませんでした。グラフが表示されているか確認してください。",
-            )
+        if path and isinstance(data_url, str) and data_url.startswith("data:"):
+            try:
+                self._save_data_url_to_path(data_url, path)
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "画像エクスポート", f"保存できません: {exc}")
+                return
+
+            QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
             return
 
-        try:
-            _, encoded = data_url.split(",", 1)
-            image_bytes = base64.b64decode(encoded)
-            with open(path, "wb") as image_file:
-                image_file.write(image_bytes)
-        except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "画像エクスポート", f"保存できません: {exc}")
-            return
+        if path and export_format in {"png", "jpeg", "webp"}:
+            pixmap = self._grab_browser_pixmap()
+            if self._save_pixmap_to_path(pixmap, path, export_format):
+                QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
+                return
 
-        QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
+        QMessageBox.warning(
+            self,
+            "画像エクスポート",
+            "画像を生成できませんでした。グラフが表示されているか確認してください。",
+        )
 
     def _reset_graph_view(self) -> None:
         self._cancel_scheduled_graph_update()
@@ -767,8 +851,25 @@ class MainWindow(QMainWindow):
                 )
 
 
+def _acquire_single_instance_lock() -> QLockFile | None:
+    lock_path = os.path.join(
+        QStandardPaths.writableLocation(QStandardPaths.TempLocation),
+        "LogAnalyzer2.lock",
+    )
+    lock = QLockFile(lock_path)
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(100):
+        return None
+    return lock
+
+
 def main() -> None:
+    instance_lock = _acquire_single_instance_lock()
+    if instance_lock is None:
+        sys.exit(0)
+
     app = QApplication(sys.argv)
+    app._instance_lock = instance_lock  # type: ignore[attr-defined]
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
