@@ -118,6 +118,10 @@ class MainWindow(QMainWindow):
         self._graph_timer.setSingleShot(True)
         self._graph_timer.timeout.connect(self._render_graph_scheduled)
 
+        self._export_poll_timer = QTimer(self)
+        self._export_poll_timer.timeout.connect(self._poll_browser_export_result)
+        self._export_poll_count = 0
+
         self.browser = QWebEngineView()
         self.browser.setMinimumHeight(360)
 
@@ -435,11 +439,14 @@ class MainWindow(QMainWindow):
         self._pending_export_format = export_format
         self._export_image_from_browser()
 
+    def _kaleido_export_unavailable(self) -> bool:
+        # PyInstaller 版 macOS では kaleido が子プロセス経由で .app を再起動するため使わない
+        return getattr(sys, "frozen", False) and sys.platform == "darwin"
+
     def _try_export_figure_to_file(
         self, fig: go.Figure, path: str, export_format: str
     ) -> bool:
-        # PyInstaller 版 macOS では kaleido が子プロセス経由で .app を再起動するため使わない
-        if getattr(sys, "frozen", False):
+        if self._kaleido_export_unavailable():
             return False
 
         kwargs: dict[str, object] = {"width": 1200, "height": 800}
@@ -462,10 +469,13 @@ class MainWindow(QMainWindow):
         export_format = self._pending_export_format
         figure = json.loads(fig.to_json())
         payload = json.dumps({"data": figure["data"], "layout": figure["layout"]})
+        # runJavaScript は Promise を解決しないため、結果を window 変数に書き出してポーリングする。
         js = f"""
-        (async function() {{
+        (function() {{
+            window.__la2_export_image = null;
             if (!window.Plotly) {{
-                return '';
+                window.__la2_export_image = '';
+                return;
             }}
 
             var figure = {payload};
@@ -482,20 +492,45 @@ class MainWindow(QMainWindow):
             }}
 
             var layout = Object.assign({{width: 1200, height: 800}}, figure.layout || {{}});
-            try {{
-                await Plotly.newPlot(host, figure.data, layout, {{displayModeBar: false}});
-                return await Plotly.toImage(host, {{
-                    format: '{export_format}',
-                    width: 1200,
-                    height: 800,
-                    scale: 2
-                }});
-            }} catch (error) {{
-                return '';
-            }}
-        }})()
+            Plotly.newPlot(host, figure.data, layout, {{displayModeBar: false}})
+                .then(function() {{
+                    return Plotly.toImage(host, {{
+                        format: '{export_format}',
+                        width: 1200,
+                        height: 800,
+                        scale: 2
+                    }});
+                }})
+                .then(function(url) {{ window.__la2_export_image = url; }})
+                .catch(function() {{ window.__la2_export_image = ''; }});
+        }})();
         """
-        self.browser.page().runJavaScript(js, self._on_browser_image_ready)
+        self.browser.page().runJavaScript(js)
+        self._export_poll_count = 0
+        self._export_poll_timer.start(100)
+
+    def _poll_browser_export_result(self) -> None:
+        self._export_poll_count += 1
+        if self._export_poll_count > 100:
+            self._export_poll_timer.stop()
+            self._on_browser_image_ready("")
+            return
+
+        self.browser.page().runJavaScript(
+            "(function() {"
+            "  var value = window.__la2_export_image;"
+            "  if (value === null || value === undefined) return null;"
+            "  window.__la2_export_image = null;"
+            "  return value;"
+            "})()",
+            self._on_export_poll_value,
+        )
+
+    def _on_export_poll_value(self, value: object) -> None:
+        if value is None:
+            return
+        self._export_poll_timer.stop()
+        self._on_browser_image_ready(value)
 
     def _grab_browser_pixmap(self):
         screen = QApplication.primaryScreen()
@@ -543,7 +578,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
             return
 
-        if path and export_format in {"png", "jpeg", "webp"}:
+        if path and export_format in {"png", "jpeg", "webp"} and sys.platform != "win32":
+            # Windows の Qt WebEngine は grab() が真っ白になることがあるため使わない
             pixmap = self._grab_browser_pixmap()
             if self._save_pixmap_to_path(pixmap, path, export_format):
                 QMessageBox.information(self, "画像エクスポート", f"保存しました:\n{path}")
