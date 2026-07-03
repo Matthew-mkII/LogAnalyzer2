@@ -7,7 +7,7 @@ PySide6 と Plotly を使ったグラフ描画アプリです。Bluetooth Low En
 ## 環境構築
 
 ```bash
-python -m venv la2
+python3 -m venv la2
 source la2/bin/activate
 pip install -r requirements.txt
 ```
