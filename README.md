@@ -48,14 +48,14 @@ build_windows.bat
 python -m venv la2
 la2\Scripts\activate
 pip install -r requirements-build.txt
-pyinstaller --noconfirm LogAnalyzer2.spec
+pyinstaller --distpath dist\LogAnalyzer2 --noconfirm LogAnalyzer2.spec
 ```
 
-3. 完了後、`dist\LogAnalyzer2\LogAnalyzer2.exe` が生成されます。
+3. 完了後、`dist\LogAnalyzer2\win\LogAnalyzer2.exe` が生成されます。
 
 ### 配布方法
 
-- **`dist\LogAnalyzer2` フォルダごと** 配布してください（exe 単体では動作しません）。
+- **`dist\LogAnalyzer2\win` フォルダごと** 配布してください（exe 単体では動作しません）。
 - 初回起動時に exe と同じ場所に `logs\` フォルダが自動作成され、CSV ログが保存されます。
 - グラフ描画用の `temp.html` も exe と同じフォルダに生成されます。
 
@@ -75,6 +75,65 @@ pyinstaller --noconfirm LogAnalyzer2.spec
 - フォルダ配布形式（onedir）を採用しています。onefile（単一 exe）は Qt WebEngine との相性問題があるため非推奨です。
 - Windows Defender 等が初回実行を警告する場合があります（コード署名未実施のため）。
 - BLE 利用には Windows 10 以降と Bluetooth 対応環境が必要です。
+
+## macOS 向けアプリ化（PyInstaller）
+
+配布用の実行ファイルは **macOS 上** でビルドしてください（PyInstaller はビルド元 OS 向けのバイナリを生成します）。
+
+### 手順（macOS）
+
+1. [Python 3](https://www.python.org/downloads/)（3.10 以降推奨）を用意します。
+2. プロジェクトフォルダで `build_macos.sh` を実行します。
+
+```bash
+cd /path/to/LogAnalyzer2
+./build_macos.sh
+```
+
+または手動で:
+
+```bash
+cd /path/to/LogAnalyzer2
+
+python3 -m venv la2
+source la2/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements-build.txt
+pyinstaller --distpath dist/LogAnalyzer2 --noconfirm LogAnalyzer2.spec
+
+DIST_DIR=dist/LogAnalyzer2/mac
+cp LICENSE THIRD_PARTY_NOTICES.txt "$DIST_DIR/"
+mkdir -p "$DIST_DIR/licenses"
+cp licenses/*.txt "$DIST_DIR/licenses/"
+```
+
+3. 完了後、`dist/LogAnalyzer2/mac/LogAnalyzer2` が生成されます（フォルダ配布形式）。
+
+### 配布方法
+
+- **`dist/LogAnalyzer2/mac` フォルダごと** 配布してください（実行ファイル単体では動作しません）。
+- 初回起動時に実行ファイルと同じ場所に `logs/` フォルダが自動作成され、CSV ログが保存されます。
+- グラフ描画用の `temp.html` も同フォルダに生成されます。
+- 配布フォルダには `LICENSE`、`THIRD_PARTY_NOTICES.txt`、`licenses/` が含まれていることを確認してください（`build_macos.sh` は自動でコピーします）。
+
+### 関連ファイル
+
+| ファイル | 内容 |
+|---------|------|
+| `LogAnalyzer2.spec` | PyInstaller 設定 |
+| `requirements-build.txt` | ビルド用依存（PyInstaller 含む） |
+| `build_macos.sh` | macOS 向けビルドスクリプト |
+| `app_paths.py` | 開発時・実行ファイル化後のパス解決 |
+| `runtime_hook_qtwebengine.py` | Qt WebEngine 用ランタイムフック |
+
+### 注意
+
+- PySide6 + Qt WebEngine + kaleido を含むため、配布フォルダのサイズは数百 MB 程度になります。
+- フォルダ配布形式（onedir）を採用しています。onefile（単一バイナリ）は Qt WebEngine との相性問題があるため非推奨です。
+- コード署名を行っていない場合、初回起動時に Gatekeeper の警告が出ることがあります（「開発元を確認できない」等）。配布先では右クリック → **開く** で起動するか、署名・公証（notarization）を行ってください。
+- 初回実行時に **Bluetooth** の使用許可を求められる場合があります（システム設定 → プライバシーとセキュリティ → Bluetooth）。
+- ビルドした Mac の CPU アーキテクチャ（Apple Silicon / Intel）向けのバイナリになります。両方に配布する場合は、それぞれの Mac でビルドするか、ユニバーサルバイナリ用の追加設定が必要です。
+- BLE 実機検証は macOS でも利用できます（`pc_ble_log_sender.py` の bless ベース送信は macOS では制約がある場合があります）。
 
 ## 使い方
 
@@ -607,6 +666,7 @@ LogAnalyzer2/
 ├── log_reader.py                # 保存済み CSV ログの読み込み
 ├── LogAnalyzer2.spec            # PyInstaller 設定
 ├── build_windows.bat            # Windows 向け exe ビルドスクリプト
+├── build_macos.sh               # macOS 向けビルドスクリプト
 ├── requirements.txt             # 実行時依存パッケージ
 ├── requirements-build.txt       # ビルド用依存（PyInstaller 等）
 ├── runtime_hook_qtwebengine.py  # Qt WebEngine ランタイムフック
@@ -634,6 +694,9 @@ LogAnalyzer2/
 ├── temp.html                    # グラフ描画用の一時 HTML（実行時に自動生成、.gitignore）
 ├── build/                       # PyInstaller 中間出力（ビルド時のみ、.gitignore）
 └── dist/                        # PyInstaller 成果物（ビルド時のみ、.gitignore）
+    └── LogAnalyzer2/
+        ├── win/                 # Windows ビルド（LogAnalyzer2.exe）
+        └── mac/                 # macOS ビルド（LogAnalyzer2）
 ```
 
 ビルドや実行で生成される `logs/`・`temp.html`・`build/`・`dist/` は `.gitignore` 対象です。ローカル開発用の仮想環境（`la2/` 等）も同様に Git 管理外です。

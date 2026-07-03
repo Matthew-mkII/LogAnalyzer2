@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 cd /d "%~dp0"
 
-set "DIST_DIR=dist\LogAnalyzer2"
+set "DIST_DIR=dist\LogAnalyzer2\win"
 
 if not exist "la2\Scripts\activate.bat" (
     echo [1/5] Creating virtual environment...
@@ -17,7 +17,7 @@ python -m pip install --upgrade pip
 pip install -r requirements-build.txt
 
 echo [3/5] Building LogAnalyzer2.exe ...
-pyinstaller --noconfirm LogAnalyzer2.spec
+pyinstaller --distpath dist\LogAnalyzer2 --noconfirm LogAnalyzer2.spec
 
 if errorlevel 1 (
     echo Build failed.

@@ -1,12 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for LogAnalyzer2
 #
-# Windows で exe を生成:
-#   pyinstaller LogAnalyzer2.spec
+# ビルド:
+#   Windows: build_windows.bat  または  pyinstaller --distpath dist/LogAnalyzer2 LogAnalyzer2.spec
+#   macOS:   build_macos.sh      または  pyinstaller --distpath dist/LogAnalyzer2 LogAnalyzer2.spec
 #
-# 出力: dist/LogAnalyzer2/LogAnalyzer2.exe （フォルダ配布形式）
+# 出力:
+#   Windows: dist/LogAnalyzer2/win/LogAnalyzer2.exe
+#   macOS:   dist/LogAnalyzer2/mac/LogAnalyzer2
+
+import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+spec_dir = os.path.dirname(os.path.abspath(SPEC))
+distpath = os.path.join(spec_dir, "dist", "LogAnalyzer2")
+bundle_subdir = "win" if sys.platform == "win32" else "mac"
 
 block_cipher = None
 
@@ -63,5 +73,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="LogAnalyzer2",
+    name=bundle_subdir,
 )
