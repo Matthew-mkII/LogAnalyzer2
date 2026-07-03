@@ -26,12 +26,11 @@ class _FilteredStderr:
 
 sys.stderr = _FilteredStderr(sys.stderr)
 
-# Qt WebEngine — OS ごとにチューニング（Windows で全ラスタライザ無効化すると描画が止まる）
+# Qt WebEngine — OS ごとにチューニング
 _chromium_flags = ["--disable-logging", "--log-level=3"]
 if sys.platform == "darwin":
     os.environ["QT_OPENGL"] = "software"
-    os.environ["QT_XCB_GL_INTEGRATION"] = "none"
-    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
     _chromium_flags.extend(["--disable-gpu", "--disable-gpu-compositing"])
 elif sys.platform == "win32":
     os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
@@ -40,11 +39,14 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(_chromium_flags)
 os.environ["QT_API"] = "pyside6"
 
 import asyncio
+import base64
+import json
 from datetime import datetime
+from pathlib import Path
 
 import plotly.graph_objects as go
 import qasync
-from PySide6.QtCore import Qt, QtMsgType, QUrl, qInstallMessageHandler
+from PySide6.QtCore import Qt, QTimer, QtMsgType, QUrl, qInstallMessageHandler
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -95,13 +97,23 @@ class MainWindow(QMainWindow):
         self._csv_view_active = False
         self._pre_csv_log_label = "ログ: 未記録"
         self._html_path = str(temp_html_path())
-        self._graph_update_handle: asyncio.Handle | None = None
+        self._graph_revision = 0
+        self._plotly_page_ready = False
+        self._plotly_page_loading = False
+        self._pending_figure: go.Figure | None = None
+        self._pending_figure_for_fallback: go.Figure | None = None
+        self._pending_export_path: str | None = None
+        self._pending_export_format = "png"
 
         self.bt_manager = BluetoothManager()
         self._log_writer = LogWriter(str(logs_dir()))
 
+        self._graph_timer = QTimer(self)
+        self._graph_timer.setSingleShot(True)
+        self._graph_timer.timeout.connect(self._render_graph)
+
         self.browser = QWebEngineView()
-        self._render_graph()
+        self.browser.setMinimumHeight(360)
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -277,6 +289,7 @@ class MainWindow(QMainWindow):
         self._graph_io_error_shown = False
         self._csv_view_active = False
         self.reset_view_btn.setEnabled(False)
+        self._reset_plotly_view()
         self._clear_series_panel()
         self._render_graph()
 
@@ -288,11 +301,6 @@ class MainWindow(QMainWindow):
             return
 
         self.log_path_label.setText(f"ログ記録中: {log_path}")
-
-    def _cancel_scheduled_graph_update(self) -> None:
-        if self._graph_update_handle is not None:
-            self._graph_update_handle.cancel()
-            self._graph_update_handle = None
 
     def _on_disconnected(self) -> None:
         self._cancel_scheduled_graph_update()
@@ -352,6 +360,7 @@ class MainWindow(QMainWindow):
         self._graph_title = (
             f"{log_data.source.name} ({log_data.plotted_rows}/{log_data.total_rows} 件)"
         )
+        self._reset_plotly_view()
         self._setup_series_panel(list(log_data.series.keys()))
         self._render_graph(title=self._graph_title)
         self.log_path_label.setText(f"表示中: {log_data.source}")
@@ -395,14 +404,64 @@ class MainWindow(QMainWindow):
             "JPEG 画像 (*.jpg)": ".jpg",
             "WebP 画像 (*.webp)": ".webp",
         }
-        suffix = extension_map.get(selected_filter, ".png")
-        if not path.lower().endswith(suffix):
+        format_map = {
+            ".png": "png",
+            ".svg": "svg",
+            ".jpg": "jpeg",
+            ".jpeg": "jpeg",
+            ".webp": "webp",
+        }
+
+        suffix = Path(path).suffix.lower()
+        if not suffix:
+            suffix = extension_map.get(selected_filter, ".png")
             path = f"{path}{suffix}"
 
+        export_format = format_map.get(suffix, "png")
+        self._pending_export_path = path
+        self._pending_export_format = export_format
+        self._export_image_from_browser()
+
+    def _export_image_from_browser(self) -> None:
+        export_format = self._pending_export_format
+        js = f"""
+        (async function() {{
+            var gd = document.querySelector('.plotly-graph-div');
+            if (!gd || !window.Plotly) {{
+                return '';
+            }}
+            try {{
+                return await Plotly.toImage(gd, {{
+                    format: '{export_format}',
+                    width: 1200,
+                    height: 800,
+                    scale: 2
+                }});
+            }} catch (error) {{
+                return '';
+            }}
+        }})()
+        """
+        self.browser.page().runJavaScript(js, self._on_browser_image_ready)
+
+    def _on_browser_image_ready(self, data_url: object) -> None:
+        path = self._pending_export_path
+        self._pending_export_path = None
+
+        if not path or not isinstance(data_url, str) or not data_url.startswith("data:"):
+            QMessageBox.warning(
+                self,
+                "画像エクスポート",
+                "画像を生成できませんでした。グラフが表示されているか確認してください。",
+            )
+            return
+
         try:
-            fig = self._build_figure(title=self._graph_title)
-            fig.write_image(path, width=1200, height=800, scale=2)
-        except Exception as exc:
+            _, encoded = data_url.split(",", 1)
+            image_bytes = base64.b64decode(encoded)
+            with open(path, "wb") as image_file:
+                image_file.write(image_bytes)
+        except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "画像エクスポート", f"保存できません: {exc}")
             return
 
@@ -417,6 +476,7 @@ class MainWindow(QMainWindow):
         self._sample_index = 0
         if not self.bt_manager.is_connected:
             self._session_start = None
+        self._reset_plotly_view()
         self._clear_series_panel()
         self._render_graph()
         self.log_path_label.setText(self._pre_csv_log_label)
@@ -453,6 +513,7 @@ class MainWindow(QMainWindow):
                 if checkbox.isChecked()
             }
 
+        self._reset_plotly_view()
         self._render_graph()
 
     def _on_data_received(self, text: str) -> None:
@@ -488,16 +549,92 @@ class MainWindow(QMainWindow):
                     self._handle_log_write_error(exc)
                     return
 
+    def _reset_plotly_view(self) -> None:
+        self._plotly_page_ready = False
+        self._plotly_page_loading = False
+        self._pending_figure = None
+        self._pending_figure_for_fallback = None
+
+    def _cancel_scheduled_graph_update(self) -> None:
+        self._graph_timer.stop()
+
     def _schedule_graph_update(self) -> None:
-        if self._graph_update_handle is not None:
+        if not self._graph_timer.isActive():
+            self._graph_timer.start(200)
+
+    def _display_graph_figure(self, fig: go.Figure) -> None:
+        if self._plotly_page_ready:
+            self._react_plotly_figure(fig)
             return
 
-        loop = asyncio.get_event_loop()
-        self._graph_update_handle = loop.call_later(0.2, self._render_graph_scheduled)
+        if self._plotly_page_loading:
+            self._pending_figure = fig
+            return
 
-    def _render_graph_scheduled(self) -> None:
-        self._graph_update_handle = None
-        self._render_graph()
+        self._load_plotly_page(fig)
+
+    def _load_plotly_page(self, fig: go.Figure) -> None:
+        self._plotly_page_loading = True
+        self._plotly_page_ready = False
+
+        tmp_path = f"{self._html_path}.tmp"
+        fig.write_html(tmp_path, include_plotlyjs=True, config={"displayModeBar": False})
+        os.replace(tmp_path, self._html_path)
+
+        def on_loaded(success: bool) -> None:
+            try:
+                self.browser.loadFinished.disconnect(on_loaded)
+            except (TypeError, RuntimeError):
+                pass
+            self._plotly_page_loading = False
+            if success:
+                self._plotly_page_ready = True
+            pending = self._pending_figure
+            self._pending_figure = None
+            if pending is not None:
+                self._display_graph_figure(pending)
+
+        self.browser.loadFinished.connect(on_loaded)
+
+        if sys.platform == "darwin":
+            url = QUrl.fromLocalFile(os.path.abspath(self._html_path))
+            url.setQuery(f"v={self._graph_revision}")
+            self._graph_revision += 1
+            self.browser.load(url)
+            return
+
+        html = fig.to_html(include_plotlyjs=True, config={"displayModeBar": False})
+        base_url = QUrl.fromLocalFile(str(app_base_dir()) + os.sep)
+        self.browser.setHtml(html, base_url)
+
+    def _react_plotly_figure(self, fig: go.Figure) -> None:
+        figure = json.loads(fig.to_json())
+        payload = json.dumps({"data": figure["data"], "layout": figure["layout"]})
+        js = f"""
+        (function() {{
+            var gd = document.querySelector('.plotly-graph-div');
+            if (!gd || !window.Plotly) return false;
+            try {{
+                var figure = {payload};
+                Plotly.react(gd, figure.data, figure.layout, {{displayModeBar: false}});
+                return true;
+            }} catch (error) {{
+                return false;
+            }}
+        }})()
+        """
+        self._pending_figure_for_fallback = fig
+        self.browser.page().runJavaScript(js, self._on_plotly_react_done)
+
+    def _on_plotly_react_done(self, ok: object) -> None:
+        fig = self._pending_figure_for_fallback
+        self._pending_figure_for_fallback = None
+        if ok is True:
+            return
+
+        self._plotly_page_ready = False
+        if fig is not None and not self._plotly_page_loading:
+            self._load_plotly_page(fig)
 
     def _normalize_x_axis(self, x_data: list[float]) -> list[float]:
         if not x_data:
@@ -573,14 +710,7 @@ class MainWindow(QMainWindow):
         fig = self._build_figure(title=title or self._graph_title)
 
         try:
-            html = fig.to_html(include_plotlyjs=True, config={"displayModeBar": False})
-            base_url = QUrl.fromLocalFile(str(app_base_dir()) + os.sep)
-            self.browser.setHtml(html, base_url)
-
-            tmp_path = f"{self._html_path}.tmp"
-            fig.write_html(tmp_path, include_plotlyjs=True)
-            os.replace(tmp_path, self._html_path)
-
+            self._display_graph_figure(fig)
             self._graph_io_error_shown = False
         except OSError as exc:
             if not self._graph_io_error_shown:
@@ -600,6 +730,7 @@ def main() -> None:
     window = MainWindow()
     window.resize(900, 650)
     window.show()
+    QTimer.singleShot(0, window._render_graph)
 
     with loop:
         loop.run_forever()
