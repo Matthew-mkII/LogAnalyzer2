@@ -62,7 +62,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from app_paths import logs_dir, temp_html_path
 from bluetooth_manager import BluetoothManager
 from log_reader import load_log_csv
-from log_writer import VALUE_COLUMNS, LogWriter, LogWriterError, parse_log_row
+from log_writer import VALUE_COLUMNS, LogWriter, LogWriterError, is_complete_log_row, parse_log_row
 
 
 def _qt_message_handler(mode, _context, message) -> None:
@@ -289,6 +289,9 @@ class MainWindow(QMainWindow):
         self.log_path_label.setText(f"ログ記録中: {log_path}")
 
     def _on_disconnected(self) -> None:
+        self._graph_timer.stop()
+        self._graph_dirty = False
+
         self.scan_btn.setEnabled(True)
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
@@ -303,6 +306,7 @@ class MainWindow(QMainWindow):
 
             if log_path:
                 self.log_path_label.setText(f"ログ保存済み: {log_path}")
+                self._sync_graph_from_log_file(log_path)
 
     def _handle_log_write_error(self, exc: LogWriterError) -> None:
         QMessageBox.warning(self, "ログ保存", str(exc))
@@ -422,10 +426,35 @@ class MainWindow(QMainWindow):
         self._series_data = {column: [] for column in VALUE_COLUMNS}
         self._setup_series_panel(list(VALUE_COLUMNS))
 
+    def _sync_graph_from_log_file(self, path: str) -> None:
+        try:
+            log_data = load_log_csv(path)
+        except Exception:
+            return
+
+        self._x_data = log_data.x
+        self._series_data = log_data.series
+        self._sample_index = log_data.last_sample_index
+        self._session_start = None
+        self._graph_title = None
+        self._csv_view_active = False
+        self.reset_view_btn.setEnabled(False)
+
+        if set(self._series_checkboxes) != set(log_data.series):
+            self._setup_series_panel(list(log_data.series.keys()))
+        else:
+            self._enabled_series = {
+                name
+                for name, checkbox in self._series_checkboxes.items()
+                if checkbox.isChecked()
+            }
+
+        self._render_graph()
+
     def _on_data_received(self, text: str) -> None:
         for line in text.splitlines():
             stripped = line.strip()
-            if not stripped:
+            if not stripped or not is_complete_log_row(stripped):
                 continue
 
             received_at = datetime.now()
@@ -436,6 +465,8 @@ class MainWindow(QMainWindow):
 
             if device_time is not None:
                 elapsed_ms = device_time
+                if self._x_data and elapsed_ms < self._x_data[-1]:
+                    continue
             else:
                 elapsed_ms = (received_at - self._session_start).total_seconds() * 1000
 

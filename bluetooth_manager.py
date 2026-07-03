@@ -147,10 +147,8 @@ class BluetoothManager(QObject):
         self._receive_buffer = ""
 
     def _flush_receive_buffer(self) -> None:
-        remainder = self._receive_buffer.strip()
+        # 改行で終わっていない断片は破棄する（切断時に誤パースされるのを防ぐ）
         self._receive_buffer = ""
-        if remainder:
-            self.data_received.emit(remainder)
 
     def _append_receive_data(self, text: str) -> None:
         self._receive_buffer += text

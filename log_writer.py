@@ -23,6 +23,14 @@ VALUE_COLUMNS = (
 ROW_COLUMN_COUNT = len(VALUE_COLUMNS)
 
 
+def is_complete_log_row(line: str) -> bool:
+    """改行まで揃った CSV 行かどうか（切断時のバッファ断片を除外する）。"""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    return len(stripped.split(",")) >= ROW_COLUMN_COUNT
+
+
 def parse_optional_float(raw: str) -> float | None:
     stripped = raw.strip()
     if not stripped:
