@@ -16,6 +16,6 @@
 #endif
 
 #ifndef TOPPERS_MACRO_ONLY
-/* SPIKE-RT が起動時に呼び出すエントリポイント（line_tracer_log_sender.cpp で実装） */
+/* SPIKE-RT が起動時に呼び出すエントリポイント（line_tracer_log_sender.c で実装） */
 extern void main_task(intptr_t exinf);
 #endif
