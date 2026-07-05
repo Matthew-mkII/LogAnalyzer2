@@ -34,6 +34,7 @@
 #include "line_tracer_log_sender.h"
 
 #include <syssvc/serial.h>
+#include "serial/serial.h"
 #include <spike/hub/battery.h>
 #include <spike/hub/bluetooth.h>
 #include <spike/hub/display.h>

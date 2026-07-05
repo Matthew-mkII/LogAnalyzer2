@@ -548,6 +548,71 @@ make deploy-lin    # Linux / WSL
 - `K_EDGE`（`K_LEFT_EDGE` / `K_RIGHT_EDGE`）は `line_tracer_log_sender.c` 先頭で切り替え
 - IMU の `yaw` は角速度積分、`roll` / `pitch` は加速度から算出（Pybricks の `tilt()` / `heading()` とは算出方法が異なる場合があります）
 
+### 実装例（SPIKE-RT + C：ログ送信のみ）
+
+ライントレースやモーター制御を行わず、LogAnalyzer2 へセンサー値だけを Bluetooth（NUS）で送信する例です。  
+サンプル: [`samples/spike_rt_log_sender/`](samples/spike_rt_log_sender/)（詳細は [samples/spike_rt_log_sender/README.md](samples/spike_rt_log_sender/README.md)）
+
+`log_sender_app.c` はデモ用の `main_task` です。起動後に `READY` を表示して BLE 接続を待ち、接続後は 10 ms 周期でバッテリー・IMU・カラーセンサー（Port E）を LogAnalyzer2 形式の CSV として送信します。約 60 秒後に `done` を送信して終了します。
+
+| 項目 | 内容 |
+|------|------|
+| 対象ハブ | SPIKE Prime（SPIKE-RT 書き込み済み） |
+| カラーセンサー | Port E（未接続の場合、HSV 列は 0 のまま） |
+| 送信周期 | `APP_INTERVAL_US`（標準: 10000 µs = 10 ms） |
+| 送信回数 | `APP_LOOP_COUNT`（標準: 6000 回 = 約 60 秒） |
+| ログ列 | `time`, `turn`, `speed`, `battery`, `angleL`, `angleR`, `hue`, `saturation`, `value`, `Kp`, `Ki`, `Kd`, `roll`, `yaw`, `pitch` |
+| 主なソース | `log_sender_app.c`, `log_sender.c`, `log_sender.h` |
+
+#### ビルドと書き込み
+
+1. サンプルを spike-rt-sample に配置:
+
+```bash
+./samples/spike_rt_log_sender/install_to_spike_rt_sample.sh /path/to/spike-rt-sample
+```
+
+2. ビルドと書き込み（ハブを DFU モードにして USB 接続）:
+
+```bash
+cd /path/to/spike-rt-sample/API-sample/log_sender
+make
+make deploy-lin    # Linux / WSL
+```
+
+3. ハブを起動し、`READY` 表示後に LogAnalyzer2 で **スキャン** → ハブを選択 → **接続**
+4. 接続後、`logs/*.csv` とグラフに受信データが記録される
+
+#### `log_sender_app.c` の変更ポイント
+
+- 送信周期を変える: `APP_INTERVAL_US`
+- 送信時間を変える: `APP_LOOP_COUNT`
+- カラーセンサーのポートを変える: `APP_COLOR_SENSOR_PORT`
+- 独自の値を送る: ループ内で `log_sender_row_t row` の各フィールド（`turn`, `speed`, `angleL`, `angleR`, `Kp`, `Ki`, `Kd` など）に値を入れてから `log_sender_send_row(&sender, &row)` を呼ぶ
+
+外部の SPIKE-RT アプリから送信機能だけを使う場合は、`log_sender.h` を include し、`log_sender.c` を一緒にビルドします。基本形は次のとおりです。
+
+```c
+log_sender_t sender;
+log_sender_row_t row;
+
+log_sender_init(&sender);
+log_sender_open_ble(&sender);
+
+log_sender_row_clear(&row);
+row.include_time = true;
+row.time_ms = log_sender_elapsed_ms(&sender);
+row.battery = (float)hub_battery_get_voltage();
+log_sender_read_imu(&sender, &row, 10000);
+log_sender_send_row(&sender, &row);
+```
+
+注意:
+
+- `battery` は mV 単位で送信します
+- IMU の `yaw` は角速度積分、`roll` / `pitch` は加速度から算出します
+- `log_sender_send_row()` は BLE 未接続時には送信しません
+
 ### 実装例（PC + bless、テスト用）
 
 PC を仮想デバイス `LogSensor` として動かすテスト用サンプルです。  
@@ -671,11 +736,21 @@ LogAnalyzer2/
 │   ├── log_format.py                       # CSV 行フォーマット共通モジュール
 │   ├── format_demo.py                      # log_format の動作確認用
 │   ├── requirements-sender.txt             # pc_ble_log_sender 用依存
-│   └── spike_rt_line_tracer_log_sender/    # SPIKE-RT (C): ライントレース + ログ
+│   ├── spike_rt_line_tracer_log_sender/    # SPIKE-RT (C): ライントレース + ログ
 │       ├── line_tracer_log_sender.c
 │       ├── line_tracer_log_sender.h
 │       ├── line_tracer_log_sender.cfg
 │       ├── line_tracer_log_sender.cdl
+│       ├── Makefile
+│       └── install_to_spike_rt_sample.sh
+│   └── spike_rt_log_sender/                # SPIKE-RT (C): ログ送信のみ
+│       ├── README.md
+│       ├── log_sender_app.c
+│       ├── log_sender_app.h
+│       ├── log_sender.c
+│       ├── log_sender.h
+│       ├── log_sender.cfg
+│       ├── log_sender.cdl
 │       ├── Makefile
 │       └── install_to_spike_rt_sample.sh
 ├── temp.html                    # グラフ描画用の一時 HTML（実行時に自動生成、.gitignore）

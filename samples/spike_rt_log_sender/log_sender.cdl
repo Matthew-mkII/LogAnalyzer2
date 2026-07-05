@@ -1,0 +1,85 @@
+/*
+ * log_sender.cdl
+ *
+ * Bluetooth シリアル（Pybricks NUS 互換）を有効化し、
+ * serial_wri_dat(SIO_BLUETOOTH_PORTID, ...) で LogAnalyzer2 へ CSV を送信します。
+ *
+ * etrobo 向け SPIKE-RT では SerialPortUART_F / SIOPortTarget1 が無いためコメントアウトしています。
+ */
+import(<kernel.cdl>);
+
+import("syssvc/tSerialPort.cdl");
+import("syssvc/tSerialAdapter.cdl");
+import("syssvc/tSysLog.cdl");
+import("syssvc/tSysLogAdapter.cdl");
+import("syssvc/tLogTask.cdl");
+import("syssvc/tBanner.cdl");
+
+import("target.cdl");
+
+import("serial/tSIOAsyncPortTest.cdl");
+
+cell tSysLogAdapter SysLogAdapter {
+  cSysLog = SysLog.eSysLog;
+};
+
+cell tSerialAdapter SerialAdapter {
+  cSerialPort[0] = SerialPortUSB1.eSerialPort;
+  cSerialPort[1] = SerialPortBluetooth1.eSerialPort;
+  cSerialPort[2] = SerialPortTest1.eSerialPort;
+  //cSerialPort[3] = SerialPortUART_F.eSerialPort;
+};
+
+cell tSysLog SysLog {
+  logBufferSize = 32;
+  initLogMask = C_EXP("LOG_UPTO(LOG_NOTICE)");
+  initLowMask = C_EXP("LOG_UPTO(LOG_WARNING)");
+  cPutLog = PutLogTarget.ePutLog;
+};
+
+/*
+cell tSerialPort SerialPortUART_F {
+  receiveBufferSize = 256;
+  sendBufferSize    = 256;
+  cSIOPort = SIOPortTarget1.eSIOPort;
+  eiSIOCBR <= SIOPortTarget1.ciSIOCBR;
+};
+*/
+
+cell tSerialAsyncPort SerialPortUSB1 {
+  receiveBufferSize = 256;
+  sendBufferSize    = 256;
+  cSIOPort = SIOPortPybricksUSB1.eSIOPort;
+  eSIOCBR <= SIOPortPybricksUSB1.cSIOCBR;
+};
+
+cell tSerialAsyncPort SerialPortBluetooth1 {
+  receiveBufferSize = 256;
+  sendBufferSize    = 256;
+  cSIOPort = SIOPortPybricksBluetooth1.eSIOPort;
+  eSIOCBR <= SIOPortPybricksBluetooth1.cSIOCBR;
+};
+
+cell tSIOAsyncPortTest SIOPortTest1 {
+};
+
+cell tSerialAsyncPort SerialPortTest1 {
+  receiveBufferSize = 10;
+  sendBufferSize    = 10;
+  cSIOPort = SIOPortTest1.eSIOPort;
+  eSIOCBR <= SIOPortTest1.cSIOCBR;
+};
+
+cell tLogTask LogTask {
+  priority  = 4;
+  stackSize = LogTaskStackSize;
+  cSerialPort        = SerialPortUSB1.eSerialPort;
+  cnSerialPortManage = SerialPortUSB1.enSerialPortManage;
+  cSysLog = SysLog.eSysLog;
+  cPutLog = PutLogTarget.ePutLog;
+};
+
+cell tBanner Banner {
+  targetName      = BannerTargetName;
+  copyrightNotice = BannerCopyrightNotice;
+};
