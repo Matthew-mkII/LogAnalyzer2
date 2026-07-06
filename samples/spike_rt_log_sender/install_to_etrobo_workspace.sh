@@ -15,6 +15,7 @@ set -euo pipefail
 
 PROJECT_NAME="${1:-log_sender}"
 WORKSPACE="${2:-${ETROBO_ROOT:-$HOME/etrobo}/workspace}"
+ETROBO_ROOT="${ETROBO_ROOT:-$(dirname "$WORKSPACE")}"
 TARGET_DIR="$WORKSPACE/$PROJECT_NAME"
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -43,7 +44,7 @@ EOF
 
 echo "Installed to $TARGET_DIR"
 echo "Next:"
-echo "  cd $WORKSPACE"
-echo "  make img=$PROJECT_NAME"
+echo "  cd \"$ETROBO_ROOT\""
+echo "  ./make img=$PROJECT_NAME"
 echo "  # ハブを DFU モードにしてから:"
-echo "  make upload"
+echo "  ./make upload"
