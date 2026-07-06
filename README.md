@@ -613,6 +613,92 @@ log_sender_send_row(&sender, &row);
 - IMU の `yaw` は角速度積分、`roll` / `pitch` は加速度から算出します
 - `log_sender_send_row()` は BLE 未接続時には送信しません
 
+### 実装例（SPIKE-RT / C++）
+
+LEGO SPIKE Prime ハブで SPIKE-RT（TOPPERS/ASP ベース）を使う場合の例です。  
+サンプル: [`samples/spike_rt_line_tracer.cpp`](samples/spike_rt_line_tracer.cpp)、[`samples/spike_rt_log_sender.cpp`](samples/spike_rt_log_sender.cpp)
+
+SPIKE-RT は C/C++ で SPIKE Prime ハブをプログラミングできる非公式ファームウェアです。リアルタイム OS（RTOS）上で動作し、PID 制御によるライントレーサーなどの実装に適しています。
+
+#### 特徴
+
+- **リアルタイム制御**: TOPPERS/ASP カーネルによる確定的な周期タスク実行
+- **C/C++ 開発**: 高速な演算処理、細かいメモリ管理が可能
+- **BLE 対応**: Nordic UART Service (NUS) で LogAnalyzer2 と通信
+- **フルアクセス**: モーター、センサー、IMU、ディスプレイなど全機能利用可能
+
+#### 接続
+
+| ポート | デバイス |
+|--------|----------|
+| Port B | 左モーター |
+| Port C | 右モーター |
+| Port E | カラーセンサー |
+
+#### 実装例（PID ライントレーサー）
+
+```cpp
+#include "spike/hub/bluetooth.h"
+#include "spike/hub/imu.h"
+#include "spike/pup/colorsensor.h"
+#include "spike/pup/motor.h"
+
+// PID 制御
+float calculate_pid_turn(float error, float dt_sec) {
+    static float integral = 0.0f;
+    static float last_error = 0.0f;
+    
+    float p_term = KP * error;
+    integral += error * dt_sec;
+    float i_term = KI * integral;
+    float d_term = KD * (error - last_error) / dt_sec;
+    
+    last_error = error;
+    return p_term + i_term + d_term;
+}
+
+// ログ送信
+void send_log_line() {
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+             "%u,%.2f,%.2f,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%.6f,%.2f,%.2f,%.2f\n",
+             elapsed_ms, turn, speed, battery, angleL, angleR,
+             hue, saturation, value, kp, ki, kd, roll, yaw, pitch);
+    
+    hub_bluetooth_send((uint8_t*)buffer, strlen(buffer));
+}
+```
+
+#### ビルドと書き込み
+
+```bash
+# SPIKE-RT SDK をクローン
+git clone https://github.com/spike-rt/spike-rt.git
+cd spike-rt/workspace/line_tracer
+
+# ビルド
+make
+
+# ハブに書き込み（DFU モード）
+make upload
+```
+
+#### 使い方
+
+1. プログラムを書き込んで起動（ディスプレイに `RDY` 表示）
+2. LogAnalyzer2 で **スキャン** → ハブを選択 → **接続**
+3. ハブの中央ボタンを押して走行開始（`GO` 表示）
+4. リアルタイムでグラフ表示 + CSV 自動保存
+5. 保存された CSV でパラメータを分析・調整
+
+詳細: [`samples/spike_rt_README.md`](samples/spike_rt_README.md)
+
+#### 注意
+
+- SPIKE-RT は非公式ファームウェアです（公式アプリから復元可能）
+- Bluetooth 接続は NUS を使用（自動設定）
+- リアルタイム制御のため、Pybricks より高精度な周期実行が可能
+
 ### 実装例（PC + bless、テスト用）
 
 PC を仮想デバイス `LogSensor` として動かすテスト用サンプルです。  
@@ -731,28 +817,15 @@ LogAnalyzer2/
 │   └── MIT.txt
 ├── logs/                        # 受信ログの保存先（実行時に自動生成、*.csv は .gitignore）
 ├── samples/                     # ログ送信サンプル
-│   ├── pybricks_line_tracer_log_sender.py  # Pybricks: ライントレース + ログ
-│   ├── pc_ble_log_sender.py                # PC BLE テスト用（bless）
-│   ├── log_format.py                       # CSV 行フォーマット共通モジュール
-│   ├── format_demo.py                      # log_format の動作確認用
-│   ├── requirements-sender.txt             # pc_ble_log_sender 用依存
-│   ├── spike_rt_line_tracer_log_sender/    # SPIKE-RT (C): ライントレース + ログ
-│       ├── line_tracer_log_sender.c
-│       ├── line_tracer_log_sender.h
-│       ├── line_tracer_log_sender.cfg
-│       ├── line_tracer_log_sender.cdl
-│       ├── Makefile
-│       └── install_to_spike_rt_sample.sh
-│   └── spike_rt_log_sender/                # SPIKE-RT (C): ログ送信のみ
-│       ├── README.md
-│       ├── log_sender_app.c
-│       ├── log_sender_app.h
-│       ├── log_sender.c
-│       ├── log_sender.h
-│       ├── log_sender.cfg
-│       ├── log_sender.cdl
-│       ├── Makefile
-│       └── install_to_spike_rt_sample.sh
+│   ├── pybricks_log_sender.py                  # Pybricks: 基本的なログ送信
+│   ├── pybricks_line_tracer_log_sender.py      # Pybricks: ライントレース + ログ
+│   ├── spike_rt_log_sender.cpp                 # SPIKE-RT (C++): 基本的なログ送信
+│   ├── spike_rt_line_tracer.cpp                # SPIKE-RT (C++): ライントレース + ログ
+│   ├── spike_rt_README.md                      # SPIKE-RT 向けビルド・使用方法
+│   ├── pc_ble_log_sender.py                    # PC BLE テスト用（bless）
+│   ├── log_format.py                           # CSV 行フォーマット共通モジュール
+│   ├── format_demo.py                          # log_format の動作確認用
+│   └── requirements-sender.txt                 # pc_ble_log_sender 用依存
 ├── temp.html                    # グラフ描画用の一時 HTML（実行時に自動生成、.gitignore）
 ├── build/                       # PyInstaller 中間出力（ビルド時のみ、.gitignore）
 └── dist/                        # PyInstaller 成果物（ビルド時のみ、.gitignore）
