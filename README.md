@@ -698,6 +698,7 @@ make upload
 - SPIKE-RT は非公式ファームウェアです（公式アプリから復元可能）
 - Bluetooth 接続は NUS を使用（自動設定）
 - リアルタイム制御のため、Pybricks より高精度な周期実行が可能
+- **デバイス名の設定**: LEGO公式アプリで事前に名前を設定してください。名前はSPIKE-RTファームウェア書き込み後も保持されます（例: `Robot-A`, `LineTracer-01`）
 
 ### 実装例（PC + bless、テスト用）
 
@@ -820,6 +821,7 @@ LogAnalyzer2/
 │   ├── pybricks_log_sender.py                  # Pybricks: 基本的なログ送信
 │   ├── pybricks_line_tracer_log_sender.py      # Pybricks: ライントレース + ログ
 │   ├── spike_rt_log_sender.cpp                 # SPIKE-RT (C++): 基本的なログ送信
+│   ├── spike_rt_log_sender_custom_name.cpp     # SPIKE-RT (C++): カスタムデバイス名版
 │   ├── spike_rt_line_tracer.cpp                # SPIKE-RT (C++): ライントレース + ログ
 │   ├── spike_rt_README.md                      # SPIKE-RT 向けビルド・使用方法
 │   ├── pc_ble_log_sender.py                    # PC BLE テスト用（bless）

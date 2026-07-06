@@ -37,6 +37,24 @@ extern "C" {
 #define RIGHT_MOTOR_PORT     PUP_PORT_C
 #define SEND_INTERVAL_MS     100
 
+// Bluetoothデバイス名の設定
+// 注意: SPIKE-RT API にはランタイムで名前を変更する関数がありません。
+// 以下のいずれかの方法で名前を設定してください：
+//
+// 方法1: LEGO公式アプリで事前に設定（推奨）
+//   - LEGO Education SPIKE アプリでハブに接続
+//   - ハブ設定から名前を変更（例: "LineTracer-01"）
+//   - SPIKE-RTファームウェアを書き込んでも名前は保持される
+//
+// 方法2: pbioライブラリの内部変数を操作（非公式、推奨しない）
+//   - extern char pbdrv_bluetooth_hub_name[16];
+//   - strncpy(pbdrv_bluetooth_hub_name, "MyRobot", 15);
+//   - 互換性の問題が発生する可能性あり
+//
+// 方法3: ファームウェアビルド時に変更（要SPIKE-RTソース修正）
+//   - lib/pbio/drv/bluetooth/bluetooth_stm32_cc2640.c の
+//     pbdrv_bluetooth_hub_name のデフォルト値を変更
+
 // --- グローバル変数 ---
 static pup_device_t *color_sensor = NULL;
 static pup_device_t *left_motor = NULL;

@@ -47,6 +47,12 @@ extern "C" {
 #define KI_DEFAULT          0.05f
 #define KD_DEFAULT          0.15f
 
+// Bluetoothデバイス名について
+// 注意: SPIKE-RT API にはランタイムで名前を変更する関数がありません。
+// 複数のロボットを識別する場合は、LEGO公式アプリで事前に名前を設定してください。
+// 例: "Robot-A", "Robot-B", "LineTracer-01" など
+// 設定した名前はSPIKE-RTファームウェアを書き込んでも保持されます。
+
 // --- グローバル変数 ---
 static pup_device_t *color_sensor = NULL;
 static pup_device_t *left_motor = NULL;

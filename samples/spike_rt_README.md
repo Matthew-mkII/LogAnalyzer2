@@ -4,7 +4,11 @@ LEGO SPIKE Prime ハブに [SPIKE-RT](https://github.com/spike-rt/spike-rt)（TO
 
 **本サンプルは SPIKE-RT 実機専用**です。etrobo のシミュレータ（RasPike / Athrill）ではビルドできません。
 
-## 目次
+| ファイル | 内容 |
+|---------|------|
+| `spike_rt_log_sender.cpp` | 基本的なログ送信の実装例 |
+| `spike_rt_log_sender_custom_name.cpp` | カスタムデバイス名設定版（pbio内部変数使用） |
+| `spike_rt_line_tracer.cpp` | PID 制御によるライントレーサー + ログ送信 |
 
 1. [SPIKE-RT モードの有効化（最初に必ず行う）](#spike-rt-モードの有効化最初に必ず行う)
 2. [クイックスタート（全体の流れ）](#クイックスタート全体の流れ)
@@ -451,7 +455,82 @@ rm -rf "$ETROBO_ROOT/workspace/line_tracer_logger"
 
 ## トラブルシューティング
 
-### `spike-rt/sdk/workspace: Not a directory` / `project not found`
+### Bluetoothデバイス名の変更
+
+**問題**: 複数のSPIKE Primeハブを同時に使用する際に、区別が難しい
+
+**解決方法**:
+
+SPIKE-RT API にはランタイムでデバイス名を変更する関数がありません。以下の方法でデバイス名を設定してください。
+
+#### 方法1: LEGO公式アプリで事前設定（推奨）
+
+1. LEGO Education SPIKE アプリをインストール
+2. ハブを USB または Bluetooth で接続
+3. ハブ設定（歯車アイコン）から名前を変更
+   - 例: `Robot-A`, `LineTracer-01`, `TestHub` など
+4. SPIKE-RT ファームウェアを書き込み
+   - **名前は保持されます**（ハブの不揮発性メモリに保存）
+5. LogAnalyzer2 でスキャンすると設定した名前が表示されます
+
+#### 方法2: pbio内部変数を操作（非公式、推奨しない）
+
+ソースコードに以下を追加（互換性リスクあり）:
+
+```cpp
+// 外部変数宣言（pbioライブラリ内部）
+extern "C" {
+    extern char pbdrv_bluetooth_hub_name[16];
+}
+
+// 初期化時に名前を設定
+void init_devices() {
+    // デバイス名を変更（最大15文字 + NULL終端）
+    strncpy(pbdrv_bluetooth_hub_name, "MyRobot", 15);
+    pbdrv_bluetooth_hub_name[15] = '\0';
+    
+    // 以下、通常の初期化...
+    color_sensor = pup_color_sensor_get_device(COLOR_SENSOR_PORT);
+    // ...
+}
+```
+
+**注意**: 
+- この方法はpbioライブラリの内部実装に依存します
+- SPIKE-RTのバージョンアップで動作しなくなる可能性があります
+- デバッグが難しくなります
+
+#### 方法3: ソースコードから再ビルド（開発者向け）
+
+SPIKE-RT SDK のソースを修正:
+
+```bash
+# SPIKE-RT ソースディレクトリに移動
+cd spike-rt/external/pybricks-micropython/lib/pbio/drv/bluetooth/
+
+# bluetooth_stm32_cc2640.c を編集
+nano bluetooth_stm32_cc2640.c
+```
+
+以下の行を変更:
+
+```c
+// 変更前
+char pbdrv_bluetooth_hub_name[16] = "Pybricks Hub";
+
+// 変更後
+char pbdrv_bluetooth_hub_name[16] = "MyRobot";
+```
+
+再ビルド:
+
+```bash
+cd spike-rt/workspace/line_tracer
+make clean
+make
+```
+
+### BLE 接続できない
 
 - SPIKE-RT モードが有効か: `ls "$ETROBO_ROOT/SPIKE_RT"`
 - `spike-rt` が空ファイルでないか: `file "$ETROBO_ROOT/spike-rt"`
