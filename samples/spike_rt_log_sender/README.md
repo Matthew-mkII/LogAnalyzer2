@@ -43,7 +43,8 @@ spike_rt_log_sender/
 ├── log_sender.cfg         # TOPPERS/ASP タスク定義
 ├── log_sender.cdl         # Bluetooth シリアル有効化（etrobo 互換）
 ├── Makefile
-└── install_to_spike_rt_sample.sh
+└── install_to_etrobo_workspace.sh   # etrobo workspace へコピー（推奨）
+└── install_to_spike_rt_sample.sh    # spike-rt-sample へコピー（別ルート）
 ```
 
 ## 前提環境
@@ -56,37 +57,40 @@ etrobo 環境を使う場合、`spike-rt-sample` は `spike-rt/spike-rt-sample` 
 
 ## ビルドと書き込み
 
-### 1. spike-rt-sample へ配置
+### etrobo workspace へ配置（推奨）
 
 LogAnalyzer2 リポジトリ内から:
 
 ```bash
+cd ~/python/LogAnalyzer2
+./samples/spike_rt_log_sender/install_to_etrobo_workspace.sh
+```
+
+例（パスを明示する場合）:
+
+```bash
+./samples/spike_rt_log_sender/install_to_etrobo_workspace.sh \
+  log_sender \
+  "$HOME/SPIKE-RT/etrobo/workspace"
+```
+
+ビルドと転送:
+
+```bash
+cd "$ETROBO_ROOT/workspace"
+make img=log_sender
+make upload    # ハブを DFU モードにしてから
+```
+
+全体の流れは [samples/spike_rt_README.md](../spike_rt_README.md) を参照してください。
+
+### spike-rt-sample へ配置（別ルート）
+
+```bash
 ./samples/spike_rt_log_sender/install_to_spike_rt_sample.sh /path/to/spike-rt-sample
-```
-
-例（etrobo 環境）:
-
-```bash
-./samples/spike_rt_log_sender/install_to_spike_rt_sample.sh \
-  $HOME/SPIKE-RT/etrobo/spike-rt/spike-rt-sample
-```
-
-### 2. ビルド
-
-```bash
 cd /path/to/spike-rt-sample/API-sample/log_sender
 make
-```
-
-成功すると `asp.bin` が生成されます。
-
-### 3. ハブへ書き込み
-
-ハブを DFU モードにして USB 接続したうえで:
-
-```bash
-make deploy-lin    # Linux / WSL
-# macOS の場合は spike-rt-sample の手順に従い deploy-win 等を使用
+make deploy-lin    # Linux / WSL。macOS は spike-rt-sample の手順を参照
 ```
 
 ## LogAnalyzer2 での受信手順
